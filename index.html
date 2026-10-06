@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,8 +9,11 @@
   <!-- Tipografías de alta gama -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Montserrat:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
 </head>
+
 <body>
 
   <!-- Barra lateral -->
@@ -370,8 +374,10 @@
         <div class="stat-card"><span>Total recibido</span><strong id="finRecibido">$0</strong></div>
         <div class="stat-card highlight-debt"><span>Dinero por cobrar</span><strong id="finPendiente">$0</strong></div>
         <div class="stat-card"><span>Ganancia total</span><strong id="finGanancia">$0</strong></div>
-        <div class="stat-card highlight-success"><span>Ganancia recibida</span><strong id="finGananciaRecibida">$0</strong></div>
-        <div class="stat-card highlight-debt"><span>Ganancia por cobrar</span><strong id="finGananciaPendiente">$0</strong></div>
+        <div class="stat-card highlight-success"><span>Ganancia recibida</span><strong
+            id="finGananciaRecibida">$0</strong></div>
+        <div class="stat-card highlight-debt"><span>Ganancia por cobrar</span><strong
+            id="finGananciaPendiente">$0</strong></div>
         <div class="stat-card"><span>Unidades vendidas</span><strong id="finUnidades">0</strong></div>
         <div class="stat-card highlight-margin"><span>Margen promedio</span><strong id="finMargen">0%</strong></div>
       </div>
@@ -381,7 +387,25 @@
       </div>
     </section>
   </main>
+  <!-- Conexión a Firebase Firestore -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyA2j5zjxrKZwY8fEdyBfsvidVD9YWr7IFM",
+      authDomain: "cfragancias-de830.firebaseapp.com",
+      projectId: "cfragancias-de830",
+      storageBucket: "cfragancias-de830.firebasestorage.app",
+      messagingSenderId: "822380671763",
+      appId: "1:822380671763:web:bac7eeff9e2f74c16520e6",
+      measurementId: "G-4NJPHDDWBK"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
   <script src="app.js"></script>
 </body>
+
 </html>

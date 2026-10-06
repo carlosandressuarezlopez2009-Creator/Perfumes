@@ -1,15 +1,97 @@
 const DIAS_RECORDATORIO = 20;
 
-let productos = JSON.parse(localStorage.getItem("productos") || "[]");
-let ventas = JSON.parse(localStorage.getItem("ventas") || "[]");
-let clientes = JSON.parse(localStorage.getItem("clientes") || "[]");
-let movimientos = JSON.parse(localStorage.getItem("movimientos") || "[]");
+// Estado en memoria
+let productos = [];
+let ventas = [];
+let clientes = [];
+let movimientos = [];
 
 let imagenProductoTemporal = "";
 let clienteCuentaAbierta = null;
 
-normalizarDatos();
-guardarTodo();
+// Referencias a colecciones de Firebase Firestore
+const colProductos = db.collection("productos");
+const colVentas = db.collection("ventas");
+const colClientes = db.collection("clientes");
+const colMovimientos = db.collection("movimientos");
+
+// Iniciar conexión y sincronización en tiempo real
+iniciarSincronizacionFirestore();
+
+async function iniciarSincronizacionFirestore() {
+  await migrarDatosLocalesAFirebase();
+
+  colProductos.onSnapshot((snapshot) => {
+    productos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    normalizarDatos();
+    actualizarTodo();
+  }, (err) => console.error("Error al sincronizar productos:", err));
+
+  colVentas.onSnapshot((snapshot) => {
+    ventas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Ordenar de más reciente a más antigua
+    ventas.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    normalizarDatos();
+    actualizarTodo();
+  }, (err) => console.error("Error al sincronizar ventas:", err));
+
+  colClientes.onSnapshot((snapshot) => {
+    clientes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    normalizarDatos();
+    actualizarTodo();
+  }, (err) => console.error("Error al sincronizar clientes:", err));
+
+  colMovimientos.onSnapshot((snapshot) => {
+    movimientos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    renderInventario();
+  }, (err) => console.error("Error al sincronizar movimientos:", err));
+}
+
+// Migra datos existentes en localStorage hacia Firebase la primera vez
+async function migrarDatosLocalesAFirebase() {
+  if (localStorage.getItem("cfragancias_migrado_firestore")) return;
+
+  const localProd = JSON.parse(localStorage.getItem("productos") || "[]");
+  const localVent = JSON.parse(localStorage.getItem("ventas") || "[]");
+  const localCli = JSON.parse(localStorage.getItem("clientes") || "[]");
+  const localMov = JSON.parse(localStorage.getItem("movimientos") || "[]");
+
+  if (!localProd.length && !localVent.length && !localCli.length && !localMov.length) {
+    localStorage.setItem("cfragancias_migrado_firestore", "true");
+    return;
+  }
+
+  try {
+    const batch = db.batch();
+
+    localProd.forEach(p => {
+      const ref = colProductos.doc(String(p.id));
+      batch.set(ref, p, { merge: true });
+    });
+
+    localCli.forEach(c => {
+      const ref = colClientes.doc(String(c.id));
+      batch.set(ref, c, { merge: true });
+    });
+
+    localVent.forEach(v => {
+      const ref = colVentas.doc(String(v.id));
+      batch.set(ref, v, { merge: true });
+    });
+
+    localMov.forEach(m => {
+      const ref = colMovimientos.doc(String(m.id));
+      batch.set(ref, m, { merge: true });
+    });
+
+    await batch.commit();
+    localStorage.setItem("cfragancias_migrado_firestore", "true");
+    console.log("Datos locales migrados con éxito a Firebase Firestore.");
+  } catch (error) {
+    console.warn("No se pudo completar la migración inicial:", error);
+  }
+}
 
 function normalizarDatos() {
   productos = Array.isArray(productos) ? productos : [];
@@ -17,8 +99,6 @@ function normalizarDatos() {
   clientes = Array.isArray(clientes) ? clientes : [];
   movimientos = Array.isArray(movimientos) ? movimientos : [];
 
-  // Las ventas antiguas no tenían sistema de pagos.
-  // Se consideran pagadas para no inventar deudas.
   ventas.forEach(v => {
     if (v.totalPagado === undefined) v.totalPagado = Number(v.total) || 0;
     if (v.saldo === undefined) v.saldo = 0;
@@ -34,13 +114,6 @@ function normalizarDatos() {
     if (c.recordatorioAtendido === undefined) c.recordatorioAtendido = false;
     if (!Array.isArray(c.perfumes)) c.perfumes = c.perfume ? [c.perfume] : [];
   });
-}
-
-function guardarTodo() {
-  localStorage.setItem("productos", JSON.stringify(productos));
-  localStorage.setItem("ventas", JSON.stringify(ventas));
-  localStorage.setItem("clientes", JSON.stringify(clientes));
-  localStorage.setItem("movimientos", JSON.stringify(movimientos));
 }
 
 function dinero(valor) {
@@ -76,15 +149,6 @@ function hoyEs(fecha) {
   return a.toDateString() === b.toDateString();
 }
 
-function diasDesde(fecha) {
-  if (!fecha) return Infinity;
-  const inicio = new Date(fecha);
-  const ahora = new Date();
-  inicio.setHours(0, 0, 0, 0);
-  ahora.setHours(0, 0, 0, 0);
-  return Math.floor((ahora - inicio) / 86400000);
-}
-
 function normalizarWhatsapp(numero) {
   let n = String(numero || "").replace(/\D/g, "");
   if (n.startsWith("57")) return n;
@@ -93,6 +157,7 @@ function normalizarWhatsapp(numero) {
 }
 
 function abrirWhatsApp(cliente) {
+  if (!cliente) return;
   const numero = normalizarWhatsapp(cliente.whatsapp);
   if (!numero) {
     alert("Este cliente no tiene un número de WhatsApp válido.");
@@ -154,7 +219,7 @@ document.getElementById("productoImagen").addEventListener("change", e => {
   lector.readAsDataURL(archivo);
 });
 
-document.getElementById("productoForm").addEventListener("submit", e => {
+document.getElementById("productoForm").addEventListener("submit", async e => {
   e.preventDefault();
 
   const id = document.getElementById("productoId").value;
@@ -172,42 +237,32 @@ document.getElementById("productoForm").addEventListener("submit", e => {
     if (!continuar) return;
   }
 
-  if (id) {
-    const producto = productos.find(p => String(p.id) === String(id));
-    if (!producto) return;
+  try {
+    if (id) {
+      const updateData = { nombre, marca, categoria, ml, costo, precio, stock };
+      if (imagenProductoTemporal) updateData.imagen = imagenProductoTemporal;
 
-    producto.nombre = nombre;
-    producto.marca = marca;
-    producto.categoria = categoria;
-    producto.ml = ml;
-    producto.costo = costo;
-    producto.precio = precio;
-    producto.stock = stock;
-
-    if (imagenProductoTemporal) {
-      producto.imagen = imagenProductoTemporal;
+      await colProductos.doc(String(id)).update(updateData);
+      alert("Producto actualizado.");
+    } else {
+      const nuevoId = String(Date.now());
+      await colProductos.doc(nuevoId).set({
+        id: nuevoId,
+        nombre,
+        marca,
+        categoria,
+        ml,
+        costo,
+        precio,
+        stock,
+        imagen: imagenProductoTemporal || ""
+      });
+      alert("Producto guardado.");
     }
-
-    alert("Producto actualizado.");
-  } else {
-    productos.push({
-      id: Date.now(),
-      nombre,
-      marca,
-      categoria,
-      ml,
-      costo,
-      precio,
-      stock,
-      imagen: imagenProductoTemporal || ""
-    });
-
-    alert("Producto guardado.");
+    limpiarFormularioProducto();
+  } catch (err) {
+    alert("Error al guardar el producto en la nube: " + err.message);
   }
-
-  limpiarFormularioProducto();
-  guardarTodo();
-  actualizarTodo();
 });
 
 document.getElementById("cancelarProducto").addEventListener("click", limpiarFormularioProducto);
@@ -223,7 +278,7 @@ function limpiarFormularioProducto() {
 }
 
 function editarProducto(id) {
-  const p = productos.find(x => x.id === id);
+  const p = productos.find(x => String(x.id) === String(id));
   if (!p) return;
 
   document.getElementById("productoId").value = p.id;
@@ -249,17 +304,19 @@ function editarProducto(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function eliminarProducto(id) {
-  const ventasDelProducto = ventas.some(v => v.productoId === id);
+async function eliminarProducto(id) {
+  const ventasDelProducto = ventas.some(v => String(v.productoId) === String(id));
   const mensaje = ventasDelProducto
     ? "Este producto tiene ventas registradas. ¿Seguro que quieres eliminarlo?"
     : "¿Quieres eliminar este producto?";
 
   if (!confirm(mensaje)) return;
 
-  productos = productos.filter(p => p.id !== id);
-  guardarTodo();
-  actualizarTodo();
+  try {
+    await colProductos.doc(String(id)).delete();
+  } catch (err) {
+    alert("Error al eliminar de Firebase: " + err.message);
+  }
 }
 
 function renderProductos() {
@@ -307,8 +364,8 @@ function renderProductos() {
             <span class="${estado}">${textoEstado}</span>
           </div>
           <div class="card-actions">
-            <button class="small-btn" onclick="editarProducto(${p.id})">Editar</button>
-            <button class="danger-btn" onclick="eliminarProducto(${p.id})">Eliminar</button>
+            <button class="small-btn" onclick="editarProducto('${p.id}')">Editar</button>
+            <button class="danger-btn" onclick="eliminarProducto('${p.id}')">Eliminar</button>
           </div>
         </div>
       </article>
@@ -330,7 +387,6 @@ function cargarSelects() {
   const perfumeMarcados = clientePerfumeLista
     ? Array.from(clientePerfumeLista.querySelectorAll("input[type=checkbox]:checked")).map(i => i.value)
     : [];
-
 
   ventaProducto.innerHTML = `<option value="">Selecciona un producto</option>` +
     productos.map(p =>
@@ -356,13 +412,13 @@ function cargarSelects() {
   }
 }
 
-function registrarMovimiento() {
-  const productoId = Number(document.getElementById("movProducto").value);
+async function registrarMovimiento() {
+  const productoId = document.getElementById("movProducto").value;
   const tipo = document.getElementById("movTipo").value;
   const cantidad = Number(document.getElementById("movCantidad").value);
   const nota = document.getElementById("movNota").value.trim();
 
-  const producto = productos.find(p => p.id === productoId);
+  const producto = productos.find(p => String(p.id) === String(productoId));
 
   if (!producto) return alert("Selecciona un producto.");
   if (!cantidad || cantidad <= 0) return alert("Escribe una cantidad válida.");
@@ -371,23 +427,30 @@ function registrarMovimiento() {
     return alert("No hay suficiente stock.");
   }
 
-  producto.stock += tipo === "entrada" ? cantidad : -cantidad;
+  const nuevoStock = producto.stock + (tipo === "entrada" ? cantidad : -cantidad);
 
-  movimientos.unshift({
-    id: Date.now(),
-    productoId,
-    producto: producto.nombre,
-    tipo,
-    cantidad,
-    nota,
-    fecha: new Date().toISOString()
-  });
+  try {
+    const movId = String(Date.now());
+    const batch = db.batch();
 
-  document.getElementById("movCantidad").value = 1;
-  document.getElementById("movNota").value = "";
+    batch.update(colProductos.doc(String(producto.id)), { stock: nuevoStock });
+    batch.set(colMovimientos.doc(movId), {
+      id: movId,
+      productoId: String(producto.id),
+      producto: producto.nombre,
+      tipo,
+      cantidad,
+      nota,
+      fecha: new Date().toISOString()
+    });
 
-  guardarTodo();
-  actualizarTodo();
+    await batch.commit();
+
+    document.getElementById("movCantidad").value = 1;
+    document.getElementById("movNota").value = "";
+  } catch (err) {
+    alert("Error al registrar movimiento: " + err.message);
+  }
 }
 
 function renderInventario() {
@@ -414,8 +477,8 @@ function renderInventario() {
           <td>${p.stock}</td>
           <td class="${estado}">${texto}</td>
           <td>
-            <button class="small-btn" onclick="prepararMovimiento(${p.id}, 'entrada')">+ Entrada</button>
-            <button class="small-btn" onclick="prepararMovimiento(${p.id}, 'salida')">- Salida</button>
+            <button class="small-btn" onclick="prepararMovimiento('${p.id}', 'entrada')">+ Entrada</button>
+            <button class="small-btn" onclick="prepararMovimiento('${p.id}', 'salida')">- Salida</button>
           </td>
         </tr>
       `;
@@ -448,7 +511,7 @@ function prepararMovimiento(productoId, tipo) {
    CLIENTES
 ========================= */
 
-document.getElementById("clienteForm").addEventListener("submit", e => {
+document.getElementById("clienteForm").addEventListener("submit", async e => {
   e.preventDefault();
 
   const id = document.getElementById("clienteId").value;
@@ -459,35 +522,36 @@ document.getElementById("clienteForm").addEventListener("submit", e => {
 
   if (!nombre) return alert("Escribe el nombre del cliente.");
 
-  if (id) {
-    const cliente = clientes.find(c => String(c.id) === String(id));
-    if (!cliente) return;
-
-    cliente.nombre = nombre;
-    cliente.whatsapp = whatsapp;
-    cliente.notas = notas;
-    cliente.perfumes = perfumes;
-    cliente.perfume = perfumes[0] || "";
-    alert("Cliente actualizado.");
-  } else {
-    clientes.push({
-      id: Date.now(),
-      nombre,
-      whatsapp,
-      notas,
-      perfumes,
-      perfume: perfumes[0] || "",
-      ultimaCompra: null,
-      proximoRecordatorio: null,
-      ultimaCompraProducto: "",
-      recordatorioAtendido: false
-    });
-    alert("Cliente guardado.");
+  try {
+    if (id) {
+      await colClientes.doc(String(id)).update({
+        nombre,
+        whatsapp,
+        notas,
+        perfumes,
+        perfume: perfumes[0] || ""
+      });
+      alert("Cliente actualizado.");
+    } else {
+      const nuevoId = String(Date.now());
+      await colClientes.doc(nuevoId).set({
+        id: nuevoId,
+        nombre,
+        whatsapp,
+        notas,
+        perfumes,
+        perfume: perfumes[0] || "",
+        ultimaCompra: null,
+        proximoRecordatorio: null,
+        ultimaCompraProducto: "",
+        recordatorioAtendido: false
+      });
+      alert("Cliente guardado.");
+    }
+    limpiarFormularioCliente();
+  } catch (err) {
+    alert("Error al guardar cliente: " + err.message);
   }
-
-  limpiarFormularioCliente();
-  guardarTodo();
-  actualizarTodo();
 });
 
 document.getElementById("cancelarCliente").addEventListener("click", limpiarFormularioCliente);
@@ -501,7 +565,7 @@ function limpiarFormularioCliente() {
 }
 
 function editarCliente(id) {
-  const c = clientes.find(x => x.id === id);
+  const c = clientes.find(x => String(x.id) === String(id));
   if (!c) return;
 
   document.getElementById("clienteId").value = c.id;
@@ -519,16 +583,18 @@ function editarCliente(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function eliminarCliente(id) {
+async function eliminarCliente(id) {
   if (!confirm("¿Quieres eliminar este cliente? Sus ventas históricas se conservarán.")) return;
 
-  clientes = clientes.filter(c => c.id !== id);
-  guardarTodo();
-  actualizarTodo();
+  try {
+    await colClientes.doc(String(id)).delete();
+  } catch (err) {
+    alert("Error al eliminar cliente: " + err.message);
+  }
 }
 
 function obtenerVentasCliente(clienteId) {
-  return ventas.filter(v => Number(v.clienteId) === Number(clienteId));
+  return ventas.filter(v => String(v.clienteId) === String(clienteId));
 }
 
 function renderClientes() {
@@ -567,10 +633,10 @@ function renderClientes() {
           </div>
 
           <div class="card-actions">
-            <button class="small-btn" onclick="verCuentaCliente(${c.id})">Ver cuenta</button>
-            ${c.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => x.id === ${c.id}))">WhatsApp</button>` : ""}
-            <button class="small-btn" onclick="editarCliente(${c.id})">Editar</button>
-            <button class="danger-btn" onclick="eliminarCliente(${c.id})">Eliminar</button>
+            <button class="small-btn" onclick="verCuentaCliente('${c.id}')">Ver cuenta</button>
+            ${c.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => String(x.id) === '${c.id}'))">WhatsApp</button>` : ""}
+            <button class="small-btn" onclick="editarCliente('${c.id}')">Editar</button>
+            <button class="danger-btn" onclick="eliminarCliente('${c.id}')">Eliminar</button>
           </div>
         </div>
       </article>
@@ -582,7 +648,7 @@ document.getElementById("buscarCliente").addEventListener("input", renderCliente
 
 function verCuentaCliente(id) {
   clienteCuentaAbierta = id;
-  const cliente = clientes.find(c => c.id === id);
+  const cliente = clientes.find(c => String(c.id) === String(id));
   if (!cliente) return;
 
   const ventasCliente = obtenerVentasCliente(id);
@@ -600,7 +666,7 @@ function verCuentaCliente(id) {
         <p>${escaparHTML(cliente.whatsapp || "Sin WhatsApp")}</p>
       </div>
       <div class="card-actions">
-        ${cliente.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => x.id === ${cliente.id}))">WhatsApp</button>` : ""}
+        ${cliente.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => String(x.id) === '${cliente.id}'))">WhatsApp</button>` : ""}
         <button class="ghost-btn" onclick="cerrarCuentaCliente()">Cerrar</button>
       </div>
     </div>
@@ -612,7 +678,7 @@ function verCuentaCliente(id) {
       <div><span>Debe</span><strong class="${deuda > 0 ? "stock-low" : "stock-ok"}">${dinero(deuda)}</strong></div>
     </div>
 
-    ${ventasCliente.length ? ventasCliente.slice().reverse().map(v => renderVentaCuenta(v)).join("") :
+    ${ventasCliente.length ? ventasCliente.map(v => renderVentaCuenta(v)).join("") :
       `<div class="empty">Este cliente todavía no tiene ventas.</div>`}
   `;
 
@@ -633,10 +699,10 @@ function renderVentaCuenta(v) {
           <div class="installment ${c.pagada ? "paid" : ""}">
             <div>
               <strong>Cuota ${c.numero}</strong><br>
-              <span class="muted">${dinero(c.monto)} · ${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
+              <span class="muted">${dinero(c.monto)} ·${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
             </div>
             ${!c.pagada && v.saldo > 0
-              ? `<button class="small-btn" onclick="pagarCuota(${v.id}, ${c.numero})">Pagar cuota</button>`
+              ? `<button class="small-btn" onclick="pagarCuota('${v.id}', ${c.numero})">Pagar cuota</button>`
               : ""}
           </div>
         `).join("")}
@@ -676,7 +742,7 @@ function renderVentaCuenta(v) {
 
       ${v.saldo > 0 ? `
         <div class="card-actions">
-          <button class="small-btn" onclick="registrarAbono(${v.id})">+ Registrar abono</button>
+          <button class="small-btn" onclick="registrarAbono('${v.id}')">+ Registrar abono</button>
         </div>
       ` : ""}
 
@@ -734,34 +800,24 @@ function obtenerDatosFormularioPago(total) {
 
   const saldo = Math.max(0, total - totalPagado);
 
-  return {
-    estado,
-    totalPagado,
-    saldo,
-    numeroCuotas
-  };
+  return { estado, totalPagado, saldo, numeroCuotas };
 }
 
 function obtenerTotalVenta() {
-  const productoId = Number(document.getElementById("ventaProducto").value);
+  const productoId = document.getElementById("ventaProducto").value;
   const cantidad = Number(document.getElementById("ventaCantidad").value) || 0;
-  const producto = productos.find(p => p.id === productoId);
+  const producto = productos.find(p => String(p.id) === String(productoId));
 
   if (!producto) return 0;
 
-  const totalNormal = producto.precio * cantidad;
+  const totalNormal = (Number(producto.precio) || 0) * cantidad;
   const precioFinal = Number(document.getElementById("ventaPrecioFinal").value) || 0;
 
   if (precioFinal > 0) return precioFinal;
-
   return totalNormal;
 }
 
 function actualizarResumenVenta() {
-  const productoId = Number(document.getElementById("ventaProducto").value);
-  const cantidad = Number(document.getElementById("ventaCantidad").value) || 0;
-  const producto = productos.find(p => p.id === productoId);
-
   const total = obtenerTotalVenta();
   const datos = obtenerDatosFormularioPago(total);
 
@@ -770,12 +826,12 @@ function actualizarResumenVenta() {
   document.getElementById("ventaSaldo").textContent = dinero(datos.saldo);
 }
 
-function registrarVenta() {
-  const productoId = Number(document.getElementById("ventaProducto").value);
+async function registrarVenta() {
+  const productoId = document.getElementById("ventaProducto").value;
   const cantidad = Number(document.getElementById("ventaCantidad").value);
   const clienteIdValor = document.getElementById("ventaCliente").value;
-  const producto = productos.find(p => p.id === productoId);
-  const cliente = clienteIdValor ? clientes.find(c => c.id === Number(clienteIdValor)) : null;
+  const producto = productos.find(p => String(p.id) === String(productoId));
+  const cliente = clienteIdValor ? clientes.find(c => String(c.id) === String(clienteIdValor)) : null;
 
   if (!producto) return alert("Selecciona un producto.");
   if (!cantidad || cantidad <= 0) return alert("La cantidad debe ser mayor que cero.");
@@ -796,26 +852,21 @@ function registrarVenta() {
     return alert("Indica cuántas cuotas tendrá el saldo.");
   }
 
-  producto.stock -= cantidad;
+  const nuevoStock = producto.stock - cantidad;
+  let estadoPagoFinal = pago.saldo === 0 ? "pagado" : pago.estado;
 
-  let estadoPagoFinal = pago.estado;
-
-  if (pago.saldo === 0) {
-    estadoPagoFinal = "pagado";
-  }
-
+  const ventaId = String(Date.now());
   const venta = {
-    id: Date.now(),
-    productoId: producto.id,
+    id: ventaId,
+    productoId: String(producto.id),
     producto: producto.nombre,
     cantidad,
-    clienteId: cliente ? cliente.id : null,
+    clienteId: cliente ? String(cliente.id) : null,
     cliente: cliente ? cliente.nombre : "Sin cliente",
     total,
-    costo: producto.costo * cantidad,
-    ganancia: total - producto.costo * cantidad,
+    costo: (Number(producto.costo) || 0) * cantidad,
+    ganancia: total - ((Number(producto.costo) || 0) * cantidad),
     fecha: new Date().toISOString(),
-
     estadoPago: estadoPagoFinal,
     totalPagado: pago.totalPagado,
     saldo: pago.saldo,
@@ -837,34 +888,46 @@ function registrarVenta() {
     venta.cuotas = generarCuotas(pago.saldo, pago.numeroCuotas);
   }
 
-  ventas.unshift(venta);
+  try {
+    const batch = db.batch();
 
-  movimientos.unshift({
-    id: Date.now() + 2,
-    productoId: producto.id,
-    producto: producto.nombre,
-    tipo: "salida",
-    cantidad,
-    nota: `Venta${cliente ? ` a ${cliente.nombre}` : ""}`,
-    fecha: new Date().toISOString()
-  });
+    // 1. Guardar la venta
+    batch.set(colVentas.doc(ventaId), venta);
 
-  if (cliente) {
-    cliente.ultimaCompra = venta.fecha;
-    cliente.ultimaCompraProducto = producto.nombre;
-    cliente.proximoRecordatorio = sumarDias(venta.fecha, DIAS_RECORDATORIO);
-    cliente.recordatorioAtendido = false;
-  }
+    // 2. Descontar stock
+    batch.update(colProductos.doc(String(producto.id)), { stock: nuevoStock });
 
-  guardarTodo();
-  limpiarFormularioVenta();
-  actualizarTodo();
+    // 3. Crear movimiento de inventario
+    const movId = String(Date.now() + 2);
+    batch.set(colMovimientos.doc(movId), {
+      id: movId,
+      productoId: String(producto.id),
+      producto: producto.nombre,
+      tipo: "salida",
+      cantidad,
+      nota: `Venta${cliente ? ` a ${cliente.nombre}` : ""}`,
+      fecha: new Date().toISOString()
+    });
 
-  alert(
-    pago.saldo > 0
+    // 4. Actualizar recordatorio de cliente
+    if (cliente) {
+      batch.update(colClientes.doc(String(cliente.id)), {
+        ultimaCompra: venta.fecha,
+        ultimaCompraProducto: producto.nombre,
+        proximoRecordatorio: sumarDias(venta.fecha, DIAS_RECORDATORIO),
+        recordatorioAtendido: false
+      });
+    }
+
+    await batch.commit();
+
+    limpiarFormularioVenta();
+    alert(pago.saldo > 0
       ? `Venta registrada. Quedan ${dinero(pago.saldo)} por cobrar.`
-      : "Venta registrada y pagada completamente."
-  );
+      : "Venta registrada y pagada completamente.");
+  } catch (err) {
+    alert("Error al registrar venta en Firebase: " + err.message);
+  }
 }
 
 function generarCuotas(saldo, cantidad) {
@@ -932,7 +995,7 @@ function renderVentas() {
 
       ${v.saldo > 0 ? `
         <div class="card-actions">
-          <button class="small-btn" onclick="registrarAbono(${v.id})">+ Registrar abono</button>
+          <button class="small-btn" onclick="registrarAbono('${v.id}')">+ Registrar abono</button>
         </div>
       ` : ""}
 
@@ -945,7 +1008,7 @@ function renderVentas() {
                 <span class="muted">${dinero(c.monto)} · ${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
               </div>
               ${!c.pagada && v.saldo > 0
-                ? `<button class="small-btn" onclick="pagarCuota(${v.id}, ${c.numero})">Pagar cuota</button>`
+                ? `<button class="small-btn" onclick="pagarCuota('${v.id}',${c.numero})">Pagar cuota</button>`
                 : ""}
             </div>
           `).join("")}
@@ -966,8 +1029,8 @@ function renderVentas() {
   `).join("");
 }
 
-function registrarAbono(ventaId) {
-  const venta = ventas.find(v => v.id === ventaId);
+async function registrarAbono(ventaId) {
+  const venta = ventas.find(v => String(v.id) === String(ventaId));
   if (!venta || venta.saldo <= 0) return;
 
   const valorTexto = prompt(`Saldo pendiente: ${dinero(venta.saldo)}\n¿Cuánto abonó?`);
@@ -982,36 +1045,43 @@ function registrarAbono(ventaId) {
     return alert("El abono no puede ser mayor que el saldo pendiente.");
   }
 
-  venta.totalPagado += monto;
-  venta.saldo -= monto;
+  const nuevoTotalPagado = (Number(venta.totalPagado) || 0) + monto;
+  const nuevoSaldo = Math.max(0, (Number(venta.saldo) || 0) - monto);
+  const nuevosAbonos = Array.isArray(venta.abonos) ? [...venta.abonos] : [];
 
-  venta.abonos.push({
+  nuevosAbonos.push({
     id: Date.now(),
     monto,
     fecha: new Date().toISOString(),
     cuota: null
   });
 
-  if (venta.saldo <= 0) {
-    venta.saldo = 0;
-    venta.estadoPago = "pagado";
-  } else if (venta.cuotas.length) {
-    venta.estadoPago = "cuotas";
-  } else {
-    venta.estadoPago = "abono";
+  let nuevoEstado = "abono";
+  if (nuevoSaldo <= 0) {
+    nuevoEstado = "pagado";
+  } else if (Array.isArray(venta.cuotas) && venta.cuotas.length) {
+    nuevoEstado = "cuotas";
   }
 
-  guardarTodo();
-  actualizarTodo();
-
-  alert("Abono registrado.");
+  try {
+    await colVentas.doc(String(venta.id)).update({
+      totalPagado: nuevoTotalPagado,
+      saldo: nuevoSaldo,
+      estadoPago: nuevoEstado,
+      abonos: nuevosAbonos
+    });
+    alert("Abono registrado.");
+  } catch (err) {
+    alert("Error al guardar abono: " + err.message);
+  }
 }
 
-function pagarCuota(ventaId, numeroCuota) {
-  const venta = ventas.find(v => v.id === ventaId);
+async function pagarCuota(ventaId, numeroCuota) {
+  const venta = ventas.find(v => String(v.id) === String(ventaId));
   if (!venta) return;
 
-  const cuota = venta.cuotas.find(c => c.numero === numeroCuota);
+  const cuotas = Array.isArray(venta.cuotas) ? [...venta.cuotas] : [];
+  const cuota = cuotas.find(c => c.numero === numeroCuota);
   if (!cuota || cuota.pagada) return;
 
   if (cuota.monto > venta.saldo) {
@@ -1021,27 +1091,31 @@ function pagarCuota(ventaId, numeroCuota) {
   cuota.pagada = true;
   cuota.fechaPago = new Date().toISOString();
 
-  venta.totalPagado += cuota.monto;
-  venta.saldo -= cuota.monto;
+  const nuevoTotalPagado = (Number(venta.totalPagado) || 0) + cuota.monto;
+  const nuevoSaldo = Math.max(0, (Number(venta.saldo) || 0) - cuota.monto);
+  const nuevosAbonos = Array.isArray(venta.abonos) ? [...venta.abonos] : [];
 
-  venta.abonos.push({
+  nuevosAbonos.push({
     id: Date.now(),
     monto: cuota.monto,
     fecha: new Date().toISOString(),
     cuota: numeroCuota
   });
 
-  if (venta.saldo <= 0) {
-    venta.saldo = 0;
-    venta.estadoPago = "pagado";
-  } else {
-    venta.estadoPago = "cuotas";
+  const nuevoEstado = nuevoSaldo <= 0 ? "pagado" : "cuotas";
+
+  try {
+    await colVentas.doc(String(venta.id)).update({
+      totalPagado: nuevoTotalPagado,
+      saldo: nuevoSaldo,
+      estadoPago: nuevoEstado,
+      cuotas,
+      abonos: nuevosAbonos
+    });
+    alert(`Cuota ${numeroCuota} registrada como pagada.`);
+  } catch (err) {
+    alert("Error al registrar cuota: " + err.message);
   }
-
-  guardarTodo();
-  actualizarTodo();
-
-  alert(`Cuota ${numeroCuota} registrada como pagada.`);
 }
 
 /* =========================
@@ -1081,8 +1155,8 @@ function renderRecordatorios() {
           </div>
 
           <div class="card-actions">
-            ${c.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => x.id === ${c.id}))">Contactar</button>` : ""}
-            <button class="small-btn" onclick="marcarRecordatorio(${c.id})">Marcar atendido</button>
+            ${c.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => String(x.id) === '${c.id}'))">Contactar</button>` : ""}
+            <button class="small-btn" onclick="marcarRecordatorio('${c.id}')">Marcar atendido</button>
           </div>
         </div>
       </article>
@@ -1090,24 +1164,23 @@ function renderRecordatorios() {
   }).join("");
 }
 
-function marcarRecordatorio(clienteId) {
-  const cliente = clientes.find(c => c.id === clienteId);
-  if (!cliente) return;
-
-  cliente.recordatorioAtendido = true;
-  guardarTodo();
-  actualizarTodo();
+async function marcarRecordatorio(clienteId) {
+  try {
+    await colClientes.doc(String(clienteId)).update({ recordatorioAtendido: true });
+  } catch (err) {
+    alert("Error al actualizar recordatorio: " + err.message);
+  }
 }
 
-function reactivarRecordatorio(clienteId) {
-  const cliente = clientes.find(c => c.id === clienteId);
-  if (!cliente) return;
-
-  cliente.recordatorioAtendido = false;
-  cliente.proximoRecordatorio = new Date().toISOString();
-
-  guardarTodo();
-  actualizarTodo();
+async function reactivarRecordatorio(clienteId) {
+  try {
+    await colClientes.doc(String(clienteId)).update({
+      recordatorioAtendido: false,
+      proximoRecordatorio: new Date().toISOString()
+    });
+  } catch (err) {
+    alert("Error al reactivar recordatorio: " + err.message);
+  }
 }
 
 /* =========================
@@ -1171,12 +1244,13 @@ function renderFinanzas() {
   const recibido = ventas.reduce((s, v) => s + Number(v.totalPagado || 0), 0);
   const pendiente = ventas.reduce((s, v) => s + Number(v.saldo || 0), 0);
   const ganancia = ventas.reduce((s, v) => s + Number(v.ganancia || 0), 0);
-  // Ganancia proporcional a lo pagado y a lo pendiente de cada venta
+
   const gananciaRecibida = ventas.reduce((s, v) => {
     const t = Number(v.total || 0);
     if (t <= 0) return s;
     return s + Number(v.ganancia || 0) * (Number(v.totalPagado || 0) / t);
   }, 0);
+
   const gananciaPendiente = ganancia - gananciaRecibida;
   const unidades = ventas.reduce((s, v) => s + Number(v.cantidad || 0), 0);
   const margen = totalVentas ? (ganancia / totalVentas) * 100 : 0;
@@ -1239,5 +1313,4 @@ function actualizarTodo() {
   actualizarResumenVenta();
 }
 
-actualizarTodo();
 cambiarFormaPago();
