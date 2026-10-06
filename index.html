@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>C Fragancias | Manager Financiero</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Tipografías de alta gama -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Barra lateral -->
+  <aside class="sidebar">
+    <div class="brand-container">
+      <img src="logo.png" alt="C Fragancias" class="sidebar-logo">
+      <div class="brand">C<span>FRAGANCIAS</span></div>
+    </div>
+
+    <nav>
+      <button class="nav-btn active" data-section="inicio">⌂ <span>Inicio</span></button>
+      <button class="nav-btn" data-section="productos">◈ <span>Productos</span></button>
+      <button class="nav-btn" data-section="inventario">▣ <span>Inventario</span></button>
+      <button class="nav-btn" data-section="ventas">↗ <span>Ventas</span></button>
+      <button class="nav-btn" data-section="clientes">♙ <span>Clientes</span></button>
+      <button class="nav-btn" data-section="recordatorios">◷ <span>Recordatorios</span></button>
+      <button class="nav-btn" data-section="finanzas">▤ <span>Finanzas</span></button>
+    </nav>
+  </aside>
+
+  <!-- Panel principal -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">Inicio</h1>
+        <p>Administra CFragancias desde un solo lugar.</p>
+      </div>
+      <div class="top-actions">
+        <button class="primary-btn" onclick="mostrarSeccion('ventas')">+ Nueva venta</button>
+      </div>
+    </header>
+
+    <!-- INICIO -->
+    <section id="inicio" class="section active">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span>Ventas hoy</span>
+          <strong id="ventasHoy">$0</strong>
+        </div>
+        <div class="stat-card">
+          <span>Ganancia hoy</span>
+          <strong id="gananciaHoy">$0</strong>
+        </div>
+        <div class="stat-card highlight-debt">
+          <span>Dinero por cobrar</span>
+          <strong id="dineroPorCobrar">$0</strong>
+        </div>
+        <div class="stat-card">
+          <span>Productos</span>
+          <strong id="cantidadProductos">0</strong>
+        </div>
+        <div class="stat-card">
+          <span>Stock total</span>
+          <strong id="stockTotal">0</strong>
+        </div>
+        <div class="stat-card">
+          <span>Clientes</span>
+          <strong id="cantidadClientes">0</strong>
+        </div>
+      </div>
+
+      <div class="content-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Clientes por contactar</h2>
+              <p>Clientes cuyo perfume está cerca de terminarse.</p>
+            </div>
+            <button class="ghost-btn" onclick="mostrarSeccion('recordatorios')">Ver todos</button>
+          </div>
+          <div id="dashboardRecordatorios" class="list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Ventas recientes</h2>
+              <p>Últimas ventas registradas.</p>
+            </div>
+            <button class="ghost-btn" onclick="mostrarSeccion('ventas')">Ver ventas</button>
+          </div>
+          <div id="ventasRecientes" class="list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRODUCTOS -->
+    <section id="productos" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Productos</h2>
+          <p>Administra tus perfumes y sus precios.</p>
+        </div>
+      </div>
+
+      <div class="panel form-panel">
+        <h3 id="tituloProductoForm">Agregar producto</h3>
+        <form id="productoForm">
+          <input type="hidden" id="productoId">
+
+          <div class="form-grid">
+            <label>Nombre
+              <input id="productoNombre" required placeholder="Ej. Hawas Fire">
+            </label>
+
+            <label>Marca / referencia
+              <input id="productoMarca" placeholder="Ej. Lattafa">
+            </label>
+
+            <label>Categoría
+              <select id="productoCategoria">
+                <option>Hombre</option>
+                <option>Mujer</option>
+                <option>Unisex</option>
+              </select>
+            </label>
+
+            <label>Tamaño (ml)
+              <input id="productoMl" type="number" min="0" placeholder="50">
+            </label>
+
+            <label>Costo
+              <input id="productoCosto" type="number" min="0" required placeholder="30000">
+            </label>
+
+            <label>Precio de venta
+              <input id="productoPrecio" type="number" min="0" required placeholder="60000">
+            </label>
+
+            <label>Stock
+              <input id="productoStock" type="number" min="0" required placeholder="10">
+            </label>
+
+            <label>Imagen
+              <input id="productoImagen" type="file" accept="image/*">
+            </label>
+          </div>
+
+          <div id="previewImagen" class="image-preview hidden"></div>
+
+          <div class="form-actions">
+            <button class="primary-btn" type="submit">Guardar producto</button>
+            <button class="ghost-btn hidden" type="button" id="cancelarProducto">Cancelar edición</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="toolbar">
+        <input id="buscarProducto" class="search" placeholder="Buscar producto...">
+      </div>
+      <div id="productosGrid" class="products-grid"></div>
+    </section>
+
+    <!-- INVENTARIO -->
+    <section id="inventario" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Inventario</h2>
+          <p>Controla entradas, salidas y movimientos.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="form-grid inventory-form">
+          <label>Producto
+            <select id="movProducto"></select>
+          </label>
+          <label>Tipo
+            <select id="movTipo">
+              <option value="entrada">Entrada</option>
+              <option value="salida">Salida</option>
+            </select>
+          </label>
+          <label>Cantidad
+            <input id="movCantidad" type="number" min="1" value="1">
+          </label>
+          <label>Nota
+            <input id="movNota" placeholder="Ej. Compra a proveedor">
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="primary-btn" onclick="registrarMovimiento()">Registrar movimiento</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Stock</th>
+                <th>Estado</th>
+                <th>Movimiento</th>
+              </tr>
+            </thead>
+            <tbody id="inventarioTabla"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Historial de movimientos</h2>
+          </div>
+        </div>
+        <div id="movimientosLista" class="list"></div>
+      </div>
+    </section>
+
+    <!-- VENTAS -->
+    <section id="ventas" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Ventas</h2>
+          <p>Registra ventas y controla cómo te pagaron.</p>
+        </div>
+      </div>
+
+      <div class="panel form-panel">
+        <h3>Nueva venta</h3>
+        <div class="form-grid">
+          <label>Producto
+            <select id="ventaProducto"></select>
+          </label>
+
+          <label>Cantidad
+            <input id="ventaCantidad" type="number" min="1" value="1">
+          </label>
+
+          <label>Cliente
+            <select id="ventaCliente"></select>
+          </label>
+
+          <label>Forma de pago
+            <select id="ventaEstadoPago">
+              <option value="pagado">Pagado completo</option>
+              <option value="abono">Abono</option>
+              <option value="cuotas">A cuotas</option>
+              <option value="pendiente">No me ha pagado</option>
+            </select>
+          </label>
+
+          <label>¿En cuánto se lo deja? (opcional)
+            <input id="ventaPrecioFinal" type="number" min="0" placeholder="Dejar precio normal">
+          </label>
+        </div>
+
+        <div id="opcionesAbono" class="payment-box hidden">
+          <label>Valor del abono inicial
+            <input id="ventaAbonoInicial" type="number" min="0" value="0">
+          </label>
+        </div>
+
+        <div id="opcionesCuotas" class="payment-box hidden">
+          <div class="form-grid">
+            <label>Abono inicial
+              <input id="ventaCuotaInicial" type="number" min="0" value="0">
+            </label>
+            <label>Número de cuotas
+              <input id="ventaNumeroCuotas" type="number" min="1" value="2">
+            </label>
+          </div>
+        </div>
+
+        <div class="payment-summary">
+          <div><span>Total</span><strong id="ventaTotal">$0</strong></div>
+          <div><span>Pagado</span><strong id="ventaPagado">$0</strong></div>
+          <div><span>Saldo</span><strong id="ventaSaldo">$0</strong></div>
+        </div>
+
+        <div class="form-actions">
+          <button class="primary-btn" onclick="registrarVenta()">Registrar venta</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Historial de ventas</h2>
+            <p>Consulta pagos, abonos y cuotas.</p>
+          </div>
+        </div>
+        <div id="ventasLista" class="sales-list"></div>
+      </div>
+    </section>
+
+    <!-- CLIENTES -->
+    <section id="clientes" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Clientes</h2>
+          <p>Gestiona tus clientes y sus cuentas.</p>
+        </div>
+      </div>
+
+      <div class="panel form-panel">
+        <h3 id="tituloClienteForm">Agregar cliente</h3>
+        <form id="clienteForm">
+          <input type="hidden" id="clienteId">
+
+          <div class="form-grid">
+            <label>Nombre
+              <input id="clienteNombre" required placeholder="Nombre del cliente">
+            </label>
+
+            <label>WhatsApp
+              <input id="clienteWhatsapp" placeholder="3001234567">
+            </label>
+
+            <label class="wide">Perfumes que eligió
+              <div id="clientePerfumeLista" class="perfume-checks"></div>
+            </label>
+
+            <label class="wide">Notas
+              <textarea id="clienteNotas" rows="3" placeholder="Preferencias, perfumes favoritos..."></textarea>
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button class="primary-btn" type="submit">Guardar cliente</button>
+            <button class="ghost-btn hidden" type="button" id="cancelarCliente">Cancelar edición</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="toolbar">
+        <input id="buscarCliente" class="search" placeholder="Buscar cliente...">
+      </div>
+
+      <div id="clientesGrid" class="customers-grid"></div>
+      <div id="cuentaCliente" class="panel hidden"></div>
+    </section>
+
+    <!-- RECORDATORIOS -->
+    <section id="recordatorios" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Recordatorios</h2>
+          <p>Contacta a clientes aproximadamente cada 20 días.</p>
+        </div>
+      </div>
+      <div id="recordatoriosLista" class="reminders-grid"></div>
+    </section>
+
+    <!-- FINANZAS -->
+    <section id="finanzas" class="section">
+      <div class="section-head">
+        <div>
+          <h2>Finanzas</h2>
+          <p>Resumen de ventas, ganancias y dinero recibido.</p>
+        </div>
+      </div>
+
+      <div class="stats-grid finance-stats">
+        <div class="stat-card"><span>Total ventas</span><strong id="finTotalVentas">$0</strong></div>
+        <div class="stat-card"><span>Total recibido</span><strong id="finRecibido">$0</strong></div>
+        <div class="stat-card highlight-debt"><span>Dinero por cobrar</span><strong id="finPendiente">$0</strong></div>
+        <div class="stat-card"><span>Ganancia total</span><strong id="finGanancia">$0</strong></div>
+        <div class="stat-card highlight-success"><span>Ganancia recibida</span><strong id="finGananciaRecibida">$0</strong></div>
+        <div class="stat-card highlight-debt"><span>Ganancia por cobrar</span><strong id="finGananciaPendiente">$0</strong></div>
+        <div class="stat-card"><span>Unidades vendidas</span><strong id="finUnidades">0</strong></div>
+        <div class="stat-card highlight-margin"><span>Margen promedio</span><strong id="finMargen">0%</strong></div>
+      </div>
+
+      <div class="panel">
+        <div id="finanzasDetalle" class="finance-lines"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
