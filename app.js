@@ -351,8 +351,8 @@ function renderProductos() {
       <article class="product-card">
         <div class="product-image">
           ${p.imagen
-            ? `<img src="${p.imagen}" alt="${escaparHTML(p.nombre)}">`
-            : `<span class="no-image">Sin imagen</span>`}
+        ? `<img src="${p.imagen}" alt="${escaparHTML(p.nombre)}">`
+        : `<span class="no-image">Sin imagen</span>`}
         </div>
         <div class="card-body">
           <h3>${escaparHTML(p.nombre)}</h3>
@@ -384,30 +384,37 @@ function cargarSelects() {
   const movProducto = document.getElementById("movProducto");
   const ventaCliente = document.getElementById("ventaCliente");
   const clientePerfumeLista = document.getElementById("clientePerfumeLista");
+
   const perfumeMarcados = clientePerfumeLista
     ? Array.from(clientePerfumeLista.querySelectorAll("input[type=checkbox]:checked")).map(i => i.value)
     : [];
 
-  ventaProducto.innerHTML = `<option value="">Selecciona un producto</option>` +
-    productos.map(p =>
-      `<option value="${p.id}">${escaparHTML(p.nombre)} — ${dinero(p.precio)} — Stock: ${p.stock}</option>`
-    ).join("");
+  if (ventaProducto) {
+    ventaProducto.innerHTML = `<option value="">Selecciona un producto</option>` +
+      productos.map(p =>
+        `<option value="${p.id}">${escaparHTML(p.nombre)} — ${dinero(p.precio)} — Stock: ${p.stock}</option>`
+      ).join("");
+  }
 
-  movProducto.innerHTML = `<option value="">Selecciona un producto</option>` +
-    productos.map(p =>
-      `<option value="${p.id}">${escaparHTML(p.nombre)} — Stock: ${p.stock}</option>`
-    ).join("");
+  if (movProducto) {
+    movProducto.innerHTML = `<option value="">Selecciona un producto</option>` +
+      productos.map(p =>
+        `<option value="${p.id}">${escaparHTML(p.nombre)} — Stock: ${p.stock}</option>`
+      ).join("");
+  }
 
-  ventaCliente.innerHTML = `<option value="">Sin cliente</option>` +
-    clientes.map(c =>
-      `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`
-    ).join("");
+  if (ventaCliente) {
+    ventaCliente.innerHTML = `<option value="">Sin cliente</option>` +
+      clientes.map(c =>
+        `<option value="${c.id}">${escaparHTML(c.nombre)}</option>`
+      ).join("");
+  }
 
   if (clientePerfumeLista) {
     clientePerfumeLista.innerHTML = productos.length
       ? productos.map(p =>
-          `<label class="perfume-check"><input type="checkbox" value="${escaparHTML(p.nombre)}" ${perfumeMarcados.includes(p.nombre) ? "checked" : ""}> ${escaparHTML(p.nombre)}${p.marca ? ` — ${escaparHTML(p.marca)}` : ""}</label>`
-        ).join("")
+        `<label class="perfume-check"><input type="checkbox" value="${escaparHTML(p.nombre)}" ${perfumeMarcados.includes(p.nombre) ? "checked" : ""}> ${escaparHTML(p.nombre)}${p.marca ? ` — ${escaparHTML(p.marca)}` : ""}</label>`
+      ).join("")
       : `<div class="perfume-vacio">Agrega productos para poder marcarlos aquí.</div>`;
   }
 }
@@ -623,9 +630,9 @@ function renderClientes() {
           <div class="customer-meta">
             WhatsApp: ${escaparHTML(c.whatsapp || "No registrado")}<br>
             ${(() => {
-              const perfumesCliente = Array.isArray(c.perfumes) ? c.perfumes : (c.perfume ? [c.perfume] : []);
-              return perfumesCliente.length ? `Perfumes: <strong>${escaparHTML(perfumesCliente.join(", "))}</strong><br>` : "";
-            })()}
+        const perfumesCliente = Array.isArray(c.perfumes) ? c.perfumes : (c.perfume ? [c.perfume] : []);
+        return perfumesCliente.length ? `Perfumes: <strong>${escaparHTML(perfumesCliente.join(", "))}</strong><br>` : "";
+      })()}
             Compras: ${ventasCliente.length}<br>
             Total comprado: ${dinero(total)}<br>
             Pagado: ${dinero(pagado)}<br>
@@ -702,8 +709,8 @@ function renderVentaCuenta(v) {
               <span class="muted">${dinero(c.monto)} ·${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
             </div>
             ${!c.pagada && v.saldo > 0
-              ? `<button class="small-btn" onclick="pagarCuota('${v.id}', ${c.numero})">Pagar cuota</button>`
-              : ""}
+        ? `<button class="small-btn" onclick="pagarCuota('${v.id}', ${c.numero})">Pagar cuota</button>`
+        : ""}
           </div>
         `).join("")}
       </div>
@@ -1008,8 +1015,8 @@ function renderVentas() {
                 <span class="muted">${dinero(c.monto)} · ${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
               </div>
               ${!c.pagada && v.saldo > 0
-                ? `<button class="small-btn" onclick="pagarCuota('${v.id}',${c.numero})">Pagar cuota</button>`
-                : ""}
+      ? `<button class="small-btn" onclick="pagarCuota('${v.id}',${c.numero})">Pagar cuota</button>`
+      : ""}
             </div>
           `).join("")}
         </div>
