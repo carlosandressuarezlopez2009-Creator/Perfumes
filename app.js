@@ -9,11 +9,12 @@ let movimientos = [];
 let imagenProductoTemporal = "";
 let clienteCuentaAbierta = null;
 
-// Referencias a colecciones de Firebase Firestore
-const colProductos = db.collection("productos");
-const colVentas = db.collection("ventas");
-const colClientes = db.collection("clientes");
-const colMovimientos = db.collection("movimientos");
+// Referencia segura a Firebase Firestore
+const firestoreDb = window.db || (typeof db !== "undefined" ? db : firebase.firestore());
+const colProductos = firestoreDb.collection("productos");
+const colVentas = firestoreDb.collection("ventas");
+const colClientes = firestoreDb.collection("clientes");
+const colMovimientos = firestoreDb.collection("movimientos");
 
 // Iniciar conexión y sincronización en tiempo real
 iniciarSincronizacionFirestore();
@@ -29,7 +30,6 @@ async function iniciarSincronizacionFirestore() {
 
   colVentas.onSnapshot((snapshot) => {
     ventas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    // Ordenar de más reciente a más antigua
     ventas.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
     normalizarDatos();
     actualizarTodo();
@@ -48,7 +48,6 @@ async function iniciarSincronizacionFirestore() {
   }, (err) => console.error("Error al sincronizar movimientos:", err));
 }
 
-// Migra datos existentes en localStorage hacia Firebase la primera vez
 async function migrarDatosLocalesAFirebase() {
   if (localStorage.getItem("cfragancias_migrado_firestore")) return;
 
@@ -63,7 +62,7 @@ async function migrarDatosLocalesAFirebase() {
   }
 
   try {
-    const batch = db.batch();
+    const batch = firestoreDb.batch();
 
     localProd.forEach(p => {
       const ref = colProductos.doc(String(p.id));
@@ -87,7 +86,6 @@ async function migrarDatosLocalesAFirebase() {
 
     await batch.commit();
     localStorage.setItem("cfragancias_migrado_firestore", "true");
-    console.log("Datos locales migrados con éxito a Firebase Firestore.");
   } catch (error) {
     console.warn("No se pudo completar la migración inicial:", error);
   }
@@ -163,7 +161,6 @@ function abrirWhatsApp(cliente) {
     alert("Este cliente no tiene un número de WhatsApp válido.");
     return;
   }
-
   const mensaje = `Hola ${cliente.nombre}, ¿cómo estás? Te escribo de CFragancias.`;
   window.open(`https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}`, "_blank");
 }
@@ -188,12 +185,10 @@ function mostrarSeccion(nombre) {
     finanzas: "Finanzas"
   };
 
-  document.getElementById("pageTitle").textContent = titulos[nombre] || nombre;
+  const pTitle = document.getElementById("pageTitle");
+  if (pTitle) pTitle.textContent = titulos[nombre] || nombre;
 
-  if (nombre === "clientes") {
-    renderClientes();
-  }
-
+  if (nombre === "clientes") renderClientes();
   actualizarTodo();
 }
 
@@ -202,78 +197,113 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
 });
 
 /* =========================
-   PRODUCTOS
+   PRODUCTOS (con compresión)
 ========================= */
 
-document.getElementById("productoImagen").addEventListener("change", e => {
-  const archivo = e.target.files[0];
-  if (!archivo) return;
+const elProdImg = document.getElementById("productoImagen");
+if (elProdImg) {
+  elProdImg.addEventListener("change", e => {
+    const archivo = e.target.files[0];
+    if (!archivo) return;
 
-  const lector = new FileReader();
-  lector.onload = () => {
-    imagenProductoTemporal = lector.result;
-    document.getElementById("previewImagen").classList.remove("hidden");
-    document.getElementById("previewImagen").innerHTML =
-      `<img src="${imagenProductoTemporal}" alt="Vista previa">`;
-  };
-  lector.readAsDataURL(archivo);
-});
+    const lector = new FileReader();
+    lector.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxDim = 400;
+        let w = img.width;
+        let h = img.height;
 
-document.getElementById("productoForm").addEventListener("submit", async e => {
-  e.preventDefault();
+        if (w > h && w > maxDim) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else if (h > maxDim) {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
 
-  const id = document.getElementById("productoId").value;
-  const nombre = document.getElementById("productoNombre").value.trim();
-  const marca = document.getElementById("productoMarca").value.trim();
-  const categoria = document.getElementById("productoCategoria").value;
-  const ml = Number(document.getElementById("productoMl").value) || 0;
-  const costo = Number(document.getElementById("productoCosto").value) || 0;
-  const precio = Number(document.getElementById("productoPrecio").value) || 0;
-  const stock = Number(document.getElementById("productoStock").value) || 0;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
 
-  if (!nombre) return alert("Escribe el nombre del producto.");
-  if (precio < costo) {
-    const continuar = confirm("El precio de venta es menor que el costo. ¿Quieres continuar?");
-    if (!continuar) return;
-  }
+        imagenProductoTemporal = canvas.toDataURL("image/jpeg", 0.7);
+        const prev = document.getElementById("previewImagen");
+        if (prev) {
+          prev.classList.remove("hidden");
+          prev.innerHTML = `<img src="${imagenProductoTemporal}" alt="Vista previa">`;
+        }
+      };
+      img.src = ev.target.result;
+    };
+    lector.readAsDataURL(archivo);
+  });
+}
 
-  try {
-    if (id) {
-      const updateData = { nombre, marca, categoria, ml, costo, precio, stock };
-      if (imagenProductoTemporal) updateData.imagen = imagenProductoTemporal;
+const elProdForm = document.getElementById("productoForm");
+if (elProdForm) {
+  elProdForm.addEventListener("submit", async e => {
+    e.preventDefault();
 
-      await colProductos.doc(String(id)).update(updateData);
-      alert("Producto actualizado.");
-    } else {
-      const nuevoId = String(Date.now());
-      await colProductos.doc(nuevoId).set({
-        id: nuevoId,
-        nombre,
-        marca,
-        categoria,
-        ml,
-        costo,
-        precio,
-        stock,
-        imagen: imagenProductoTemporal || ""
-      });
-      alert("Producto guardado.");
+    const id = document.getElementById("productoId") ? document.getElementById("productoId").value : "";
+    const nombre = document.getElementById("productoNombre") ? document.getElementById("productoNombre").value.trim() : "";
+    const marca = document.getElementById("productoMarca") ? document.getElementById("productoMarca").value.trim() : "";
+    const categoria = document.getElementById("productoCategoria") ? document.getElementById("productoCategoria").value : "Hombre";
+    const ml = Number(document.getElementById("productoMl") ? document.getElementById("productoMl").value : 0) || 0;
+    const costo = Number(document.getElementById("productoCosto") ? document.getElementById("productoCosto").value : 0) || 0;
+    const precio = Number(document.getElementById("productoPrecio") ? document.getElementById("productoPrecio").value : 0) || 0;
+    const stock = Number(document.getElementById("productoStock") ? document.getElementById("productoStock").value : 0) || 0;
+
+    if (!nombre) return alert("Escribe el nombre del producto.");
+    if (precio < costo) {
+      const continuar = confirm("El precio de venta es menor que el costo. ¿Quieres continuar?");
+      if (!continuar) return;
     }
-    limpiarFormularioProducto();
-  } catch (err) {
-    alert("Error al guardar el producto en la nube: " + err.message);
-  }
-});
 
-document.getElementById("cancelarProducto").addEventListener("click", limpiarFormularioProducto);
+    try {
+      if (id) {
+        const updateData = { nombre, marca, categoria, ml, costo, precio, stock };
+        if (imagenProductoTemporal) updateData.imagen = imagenProductoTemporal;
+
+        await colProductos.doc(String(id)).update(updateData);
+        alert("Producto actualizado.");
+      } else {
+        const nuevoId = String(Date.now());
+        await colProductos.doc(nuevoId).set({
+          id: nuevoId,
+          nombre,
+          marca,
+          categoria,
+          ml,
+          costo,
+          precio,
+          stock,
+          imagen: imagenProductoTemporal || ""
+        });
+        alert("Producto guardado.");
+      }
+      limpiarFormularioProducto();
+    } catch (err) {
+      alert("Error al guardar el producto en la nube: " + err.message);
+    }
+  });
+}
+
+const elCancProd = document.getElementById("cancelarProducto");
+if (elCancProd) elCancProd.addEventListener("click", limpiarFormularioProducto);
 
 function limpiarFormularioProducto() {
-  document.getElementById("productoForm").reset();
-  document.getElementById("productoId").value = "";
-  document.getElementById("tituloProductoForm").textContent = "Agregar producto";
-  document.getElementById("cancelarProducto").classList.add("hidden");
-  document.getElementById("previewImagen").classList.add("hidden");
-  document.getElementById("previewImagen").innerHTML = "";
+  const form = document.getElementById("productoForm");
+  if (form) form.reset();
+  if (document.getElementById("productoId")) document.getElementById("productoId").value = "";
+  if (document.getElementById("tituloProductoForm")) document.getElementById("tituloProductoForm").textContent = "Agregar producto";
+  if (document.getElementById("cancelarProducto")) document.getElementById("cancelarProducto").classList.add("hidden");
+  const prev = document.getElementById("previewImagen");
+  if (prev) {
+    prev.classList.add("hidden");
+    prev.innerHTML = "";
+  }
   imagenProductoTemporal = "";
 }
 
@@ -281,25 +311,25 @@ function editarProducto(id) {
   const p = productos.find(x => String(x.id) === String(id));
   if (!p) return;
 
-  document.getElementById("productoId").value = p.id;
-  document.getElementById("productoNombre").value = p.nombre;
-  document.getElementById("productoMarca").value = p.marca || "";
-  document.getElementById("productoCategoria").value = p.categoria || "Hombre";
-  document.getElementById("productoMl").value = p.ml || "";
-  document.getElementById("productoCosto").value = p.costo || 0;
-  document.getElementById("productoPrecio").value = p.precio || 0;
-  document.getElementById("productoStock").value = p.stock || 0;
+  if (document.getElementById("productoId")) document.getElementById("productoId").value = p.id;
+  if (document.getElementById("productoNombre")) document.getElementById("productoNombre").value = p.nombre;
+  if (document.getElementById("productoMarca")) document.getElementById("productoMarca").value = p.marca || "";
+  if (document.getElementById("productoCategoria")) document.getElementById("productoCategoria").value = p.categoria || "Hombre";
+  if (document.getElementById("productoMl")) document.getElementById("productoMl").value = p.ml || "";
+  if (document.getElementById("productoCosto")) document.getElementById("productoCosto").value = p.costo || 0;
+  if (document.getElementById("productoPrecio")) document.getElementById("productoPrecio").value = p.precio || 0;
+  if (document.getElementById("productoStock")) document.getElementById("productoStock").value = p.stock || 0;
 
   imagenProductoTemporal = p.imagen || "";
 
-  if (p.imagen) {
-    document.getElementById("previewImagen").classList.remove("hidden");
-    document.getElementById("previewImagen").innerHTML =
-      `<img src="${p.imagen}" alt="Imagen del producto">`;
+  const prev = document.getElementById("previewImagen");
+  if (p.imagen && prev) {
+    prev.classList.remove("hidden");
+    prev.innerHTML = `<img src="${p.imagen}" alt="Imagen del producto">`;
   }
 
-  document.getElementById("tituloProductoForm").textContent = "Editar producto";
-  document.getElementById("cancelarProducto").classList.remove("hidden");
+  if (document.getElementById("tituloProductoForm")) document.getElementById("tituloProductoForm").textContent = "Editar producto";
+  if (document.getElementById("cancelarProducto")) document.getElementById("cancelarProducto").classList.remove("hidden");
   mostrarSeccion("productos");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -321,7 +351,9 @@ async function eliminarProducto(id) {
 
 function renderProductos() {
   const contenedor = document.getElementById("productosGrid");
-  const busqueda = document.getElementById("buscarProducto").value.toLowerCase().trim();
+  if (!contenedor) return;
+
+  const busqueda = (document.getElementById("buscarProducto") ? document.getElementById("buscarProducto").value : "").toLowerCase().trim();
 
   const filtrados = productos.filter(p =>
     `${p.nombre} ${p.marca || ""} ${p.categoria || ""}`.toLowerCase().includes(busqueda)
@@ -351,8 +383,8 @@ function renderProductos() {
       <article class="product-card">
         <div class="product-image">
           ${p.imagen
-        ? `<img src="${p.imagen}" alt="${escaparHTML(p.nombre)}">`
-        : `<span class="no-image">Sin imagen</span>`}
+            ? `<img src="${p.imagen}" alt="${escaparHTML(p.nombre)}">`
+            : `<span class="no-image">Sin imagen</span>`}
         </div>
         <div class="card-body">
           <h3>${escaparHTML(p.nombre)}</h3>
@@ -373,10 +405,11 @@ function renderProductos() {
   }).join("");
 }
 
-document.getElementById("buscarProducto").addEventListener("input", renderProductos);
+const elBuscProd = document.getElementById("buscarProducto");
+if (elBuscProd) elBuscProd.addEventListener("input", renderProductos);
 
 /* =========================
-   INVENTARIO
+   INVENTARIO Y SELECTS (PROTEGIDOS)
 ========================= */
 
 function cargarSelects() {
@@ -413,20 +446,21 @@ function cargarSelects() {
   if (clientePerfumeLista) {
     clientePerfumeLista.innerHTML = productos.length
       ? productos.map(p =>
-        `<label class="perfume-check"><input type="checkbox" value="${escaparHTML(p.nombre)}" ${perfumeMarcados.includes(p.nombre) ? "checked" : ""}> ${escaparHTML(p.nombre)}${p.marca ? ` — ${escaparHTML(p.marca)}` : ""}</label>`
-      ).join("")
+          `<label class="perfume-check"><input type="checkbox" value="${escaparHTML(p.nombre)}" ${perfumeMarcados.includes(p.nombre) ? "checked" : ""}> ${escaparHTML(p.nombre)}${p.marca ? ` — ${escaparHTML(p.marca)}` : ""}</label>`
+        ).join("")
       : `<div class="perfume-vacio">Agrega productos para poder marcarlos aquí.</div>`;
   }
 }
 
 async function registrarMovimiento() {
-  const productoId = document.getElementById("movProducto").value;
+  const movProdEl = document.getElementById("movProducto");
+  if (!movProdEl) return;
+  const productoId = movProdEl.value;
   const tipo = document.getElementById("movTipo").value;
   const cantidad = Number(document.getElementById("movCantidad").value);
   const nota = document.getElementById("movNota").value.trim();
 
   const producto = productos.find(p => String(p.id) === String(productoId));
-
   if (!producto) return alert("Selecciona un producto.");
   if (!cantidad || cantidad <= 0) return alert("Escribe una cantidad válida.");
 
@@ -438,7 +472,7 @@ async function registrarMovimiento() {
 
   try {
     const movId = String(Date.now());
-    const batch = db.batch();
+    const batch = firestoreDb.batch();
 
     batch.update(colProductos.doc(String(producto.id)), { stock: nuevoStock });
     batch.set(colMovimientos.doc(movId), {
@@ -452,9 +486,8 @@ async function registrarMovimiento() {
     });
 
     await batch.commit();
-
-    document.getElementById("movCantidad").value = 1;
-    document.getElementById("movNota").value = "";
+    if (document.getElementById("movCantidad")) document.getElementById("movCantidad").value = 1;
+    if (document.getElementById("movNota")) document.getElementById("movNota").value = "";
   } catch (err) {
     alert("Error al registrar movimiento: " + err.message);
   }
@@ -462,129 +495,137 @@ async function registrarMovimiento() {
 
 function renderInventario() {
   const tbody = document.getElementById("inventarioTabla");
+  if (tbody) {
+    if (!productos.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty">No hay productos.</td></tr>`;
+    } else {
+      tbody.innerHTML = productos.map(p => {
+        let estado = "stock-ok";
+        let texto = "Normal";
 
-  if (!productos.length) {
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">No hay productos.</td></tr>`;
-  } else {
-    tbody.innerHTML = productos.map(p => {
-      let estado = "stock-ok";
-      let texto = "Normal";
+        if (p.stock <= 0) {
+          estado = "stock-empty";
+          texto = "Agotado";
+        } else if (p.stock <= 3) {
+          estado = "stock-low";
+          texto = "Stock bajo";
+        }
 
-      if (p.stock <= 0) {
-        estado = "stock-empty";
-        texto = "Agotado";
-      } else if (p.stock <= 3) {
-        estado = "stock-low";
-        texto = "Stock bajo";
-      }
-
-      return `
-        <tr>
-          <td>${escaparHTML(p.nombre)}</td>
-          <td>${p.stock}</td>
-          <td class="${estado}">${texto}</td>
-          <td>
-            <button class="small-btn" onclick="prepararMovimiento('${p.id}', 'entrada')">+ Entrada</button>
-            <button class="small-btn" onclick="prepararMovimiento('${p.id}', 'salida')">- Salida</button>
-          </td>
-        </tr>
-      `;
-    }).join("");
+        return `
+          <tr>
+            <td>${escaparHTML(p.nombre)}</td>
+            <td>${p.stock}</td>
+            <td class="${estado}">${texto}</td>
+            <td>
+              <button class="small-btn" onclick="prepararMovimiento('${p.id}', 'entrada')">+ Entrada</button>
+              <button class="small-btn" onclick="prepararMovimiento('${p.id}', 'salida')">- Salida</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
   }
 
   const lista = document.getElementById("movimientosLista");
-
-  if (!movimientos.length) {
-    lista.innerHTML = `<div class="empty">Todavía no hay movimientos.</div>`;
-    return;
+  if (lista) {
+    if (!movimientos.length) {
+      lista.innerHTML = `<div class="empty">Todavía no hay movimientos.</div>`;
+    } else {
+      lista.innerHTML = movimientos.slice(0, 30).map(m => `
+        <div class="list-item">
+          <strong>${m.tipo === "entrada" ? "Entrada" : "Salida"} · ${escaparHTML(m.producto)}</strong>
+          <div class="muted">${m.cantidad} unidades · ${fechaHoraTexto(m.fecha)}${m.nota ? ` · ${escaparHTML(m.nota)}` : ""}</div>
+        </div>
+      `).join("");
+    }
   }
-
-  lista.innerHTML = movimientos.slice(0, 30).map(m => `
-    <div class="list-item">
-      <strong>${m.tipo === "entrada" ? "Entrada" : "Salida"} · ${escaparHTML(m.producto)}</strong>
-      <div class="muted">${m.cantidad} unidades · ${fechaHoraTexto(m.fecha)}${m.nota ? ` · ${escaparHTML(m.nota)}` : ""}</div>
-    </div>
-  `).join("");
 }
 
 function prepararMovimiento(productoId, tipo) {
-  document.getElementById("movProducto").value = productoId;
-  document.getElementById("movTipo").value = tipo;
-  document.getElementById("movCantidad").focus();
-  window.scrollTo({ top: document.getElementById("movProducto").getBoundingClientRect().top + window.scrollY - 100, behavior: "smooth" });
+  if (document.getElementById("movProducto")) document.getElementById("movProducto").value = productoId;
+  if (document.getElementById("movTipo")) document.getElementById("movTipo").value = tipo;
+  if (document.getElementById("movCantidad")) {
+    document.getElementById("movCantidad").focus();
+    window.scrollTo({ top: document.getElementById("movProducto").getBoundingClientRect().top + window.scrollY - 100, behavior: "smooth" });
+  }
 }
 
 /* =========================
    CLIENTES
 ========================= */
 
-document.getElementById("clienteForm").addEventListener("submit", async e => {
-  e.preventDefault();
+const elCliForm = document.getElementById("clienteForm");
+if (elCliForm) {
+  elCliForm.addEventListener("submit", async e => {
+    e.preventDefault();
 
-  const id = document.getElementById("clienteId").value;
-  const nombre = document.getElementById("clienteNombre").value.trim();
-  const whatsapp = document.getElementById("clienteWhatsapp").value.trim();
-  const notas = document.getElementById("clienteNotas").value.trim();
-  const perfumes = Array.from(document.querySelectorAll("#clientePerfumeLista input[type=checkbox]:checked")).map(i => i.value);
+    const id = document.getElementById("clienteId") ? document.getElementById("clienteId").value : "";
+    const nombre = document.getElementById("clienteNombre") ? document.getElementById("clienteNombre").value.trim() : "";
+    const whatsapp = document.getElementById("clienteWhatsapp") ? document.getElementById("clienteWhatsapp").value.trim() : "";
+    const notas = document.getElementById("clienteNotas") ? document.getElementById("clienteNotas").value.trim() : "";
+    const perfumes = Array.from(document.querySelectorAll("#clientePerfumeLista input[type=checkbox]:checked")).map(i => i.value);
 
-  if (!nombre) return alert("Escribe el nombre del cliente.");
+    if (!nombre) return alert("Escribe el nombre del cliente.");
 
-  try {
-    if (id) {
-      await colClientes.doc(String(id)).update({
-        nombre,
-        whatsapp,
-        notas,
-        perfumes,
-        perfume: perfumes[0] || ""
-      });
-      alert("Cliente actualizado.");
-    } else {
-      const nuevoId = String(Date.now());
-      await colClientes.doc(nuevoId).set({
-        id: nuevoId,
-        nombre,
-        whatsapp,
-        notas,
-        perfumes,
-        perfume: perfumes[0] || "",
-        ultimaCompra: null,
-        proximoRecordatorio: null,
-        ultimaCompraProducto: "",
-        recordatorioAtendido: false
-      });
-      alert("Cliente guardado.");
+    try {
+      if (id) {
+        await colClientes.doc(String(id)).update({
+          nombre,
+          whatsapp,
+          notas,
+          perfumes,
+          perfume: perfumes[0] || ""
+        });
+        alert("Cliente actualizado.");
+      } else {
+        const nuevoId = String(Date.now());
+        await colClientes.doc(nuevoId).set({
+          id: nuevoId,
+          nombre,
+          whatsapp,
+          notas,
+          perfumes,
+          perfume: perfumes[0] || "",
+          ultimaCompra: null,
+          proximoRecordatorio: null,
+          ultimaCompraProducto: "",
+          recordatorioAtendido: false
+        });
+        alert("Cliente guardado.");
+      }
+      limpiarFormularioCliente();
+    } catch (err) {
+      alert("Error al guardar cliente: " + err.message);
     }
-    limpiarFormularioCliente();
-  } catch (err) {
-    alert("Error al guardar cliente: " + err.message);
-  }
-});
+  });
+}
 
-document.getElementById("cancelarCliente").addEventListener("click", limpiarFormularioCliente);
+const elCancCli = document.getElementById("cancelarCliente");
+if (elCancCli) elCancCli.addEventListener("click", limpiarFormularioCliente);
 
 function limpiarFormularioCliente() {
-  document.getElementById("clienteForm").reset();
+  const form = document.getElementById("clienteForm");
+  if (form) form.reset();
   document.querySelectorAll("#clientePerfumeLista input[type=checkbox]:checked").forEach(box => { box.checked = false; });
-  document.getElementById("clienteId").value = "";
-  document.getElementById("tituloClienteForm").textContent = "Agregar cliente";
-  document.getElementById("cancelarCliente").classList.add("hidden");
+  if (document.getElementById("clienteId")) document.getElementById("clienteId").value = "";
+  if (document.getElementById("tituloClienteForm")) document.getElementById("tituloClienteForm").textContent = "Agregar cliente";
+  if (document.getElementById("cancelarCliente")) document.getElementById("cancelarCliente").classList.add("hidden");
 }
 
 function editarCliente(id) {
   const c = clientes.find(x => String(x.id) === String(id));
   if (!c) return;
 
-  document.getElementById("clienteId").value = c.id;
-  document.getElementById("clienteNombre").value = c.nombre;
-  document.getElementById("clienteWhatsapp").value = c.whatsapp || "";
-  document.getElementById("clienteNotas").value = c.notas || "";
+  if (document.getElementById("clienteId")) document.getElementById("clienteId").value = c.id;
+  if (document.getElementById("clienteNombre")) document.getElementById("clienteNombre").value = c.nombre;
+  if (document.getElementById("clienteWhatsapp")) document.getElementById("clienteWhatsapp").value = c.whatsapp || "";
+  if (document.getElementById("clienteNotas")) document.getElementById("clienteNotas").value = c.notas || "";
   document.querySelectorAll("#clientePerfumeLista input[type=checkbox]").forEach(box => {
     box.checked = (c.perfumes || (c.perfume ? [c.perfume] : [])).includes(box.value);
   });
 
-  document.getElementById("tituloClienteForm").textContent = "Editar cliente";
-  document.getElementById("cancelarCliente").classList.remove("hidden");
+  if (document.getElementById("tituloClienteForm")) document.getElementById("tituloClienteForm").textContent = "Editar cliente";
+  if (document.getElementById("cancelarCliente")) document.getElementById("cancelarCliente").classList.remove("hidden");
 
   mostrarSeccion("clientes");
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -606,7 +647,9 @@ function obtenerVentasCliente(clienteId) {
 
 function renderClientes() {
   const contenedor = document.getElementById("clientesGrid");
-  const busqueda = document.getElementById("buscarCliente").value.toLowerCase().trim();
+  if (!contenedor) return;
+
+  const busqueda = (document.getElementById("buscarCliente") ? document.getElementById("buscarCliente").value : "").toLowerCase().trim();
 
   const filtrados = clientes.filter(c =>
     `${c.nombre} ${c.whatsapp || ""}`.toLowerCase().includes(busqueda)
@@ -630,9 +673,9 @@ function renderClientes() {
           <div class="customer-meta">
             WhatsApp: ${escaparHTML(c.whatsapp || "No registrado")}<br>
             ${(() => {
-        const perfumesCliente = Array.isArray(c.perfumes) ? c.perfumes : (c.perfume ? [c.perfume] : []);
-        return perfumesCliente.length ? `Perfumes: <strong>${escaparHTML(perfumesCliente.join(", "))}</strong><br>` : "";
-      })()}
+              const perfumesCliente = Array.isArray(c.perfumes) ? c.perfumes : (c.perfume ? [c.perfume] : []);
+              return perfumesCliente.length ? `Perfumes: <strong>${escaparHTML(perfumesCliente.join(", "))}</strong><br>` : "";
+            })()}
             Compras: ${ventasCliente.length}<br>
             Total comprado: ${dinero(total)}<br>
             Pagado: ${dinero(pagado)}<br>
@@ -651,7 +694,8 @@ function renderClientes() {
   }).join("");
 }
 
-document.getElementById("buscarCliente").addEventListener("input", renderClientes);
+const elBuscCli = document.getElementById("buscarCliente");
+if (elBuscCli) elBuscCli.addEventListener("input", renderClientes);
 
 function verCuentaCliente(id) {
   clienteCuentaAbierta = id;
@@ -664,6 +708,7 @@ function verCuentaCliente(id) {
   const deuda = ventasCliente.reduce((s, v) => s + Number(v.saldo || 0), 0);
 
   const panel = document.getElementById("cuentaCliente");
+  if (!panel) return;
   panel.classList.remove("hidden");
 
   panel.innerHTML = `
@@ -694,8 +739,11 @@ function verCuentaCliente(id) {
 
 function cerrarCuentaCliente() {
   clienteCuentaAbierta = null;
-  document.getElementById("cuentaCliente").classList.add("hidden");
-  document.getElementById("cuentaCliente").innerHTML = "";
+  const panel = document.getElementById("cuentaCliente");
+  if (panel) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+  }
 }
 
 function renderVentaCuenta(v) {
@@ -709,8 +757,8 @@ function renderVentaCuenta(v) {
               <span class="muted">${dinero(c.monto)} ·${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
             </div>
             ${!c.pagada && v.saldo > 0
-        ? `<button class="small-btn" onclick="pagarCuota('${v.id}', ${c.numero})">Pagar cuota</button>`
-        : ""}
+              ? `<button class="small-btn" onclick="pagarCuota('${v.id}', ${c.numero})">Pagar cuota</button>`
+              : ""}
           </div>
         `).join("")}
       </div>
@@ -760,83 +808,81 @@ function renderVentaCuenta(v) {
 }
 
 /* =========================
-   VENTAS Y PAGOS
+   VENTAS Y FORMA DE PAGO (PROTEGIDOS)
 ========================= */
 
-document.getElementById("ventaProducto").addEventListener("change", actualizarResumenVenta);
-document.getElementById("ventaCantidad").addEventListener("input", actualizarResumenVenta);
-document.getElementById("ventaEstadoPago").addEventListener("change", cambiarFormaPago);
-document.getElementById("ventaPrecioFinal").addEventListener("input", actualizarResumenVenta);
-document.getElementById("ventaAbonoInicial").addEventListener("input", actualizarResumenVenta);
-document.getElementById("ventaCuotaInicial").addEventListener("input", actualizarResumenVenta);
-document.getElementById("ventaNumeroCuotas").addEventListener("input", actualizarResumenVenta);
+document.getElementById("ventaProducto")?.addEventListener("change", actualizarResumenVenta);
+document.getElementById("ventaCantidad")?.addEventListener("input", actualizarResumenVenta);
+document.getElementById("ventaEstadoPago")?.addEventListener("change", cambiarFormaPago);
+document.getElementById("ventaPrecioFinal")?.addEventListener("input", actualizarResumenVenta);
+document.getElementById("ventaAbonoInicial")?.addEventListener("input", actualizarResumenVenta);
+document.getElementById("ventaCuotaInicial")?.addEventListener("input", actualizarResumenVenta);
+document.getElementById("ventaNumeroCuotas")?.addEventListener("input", actualizarResumenVenta);
 
 function cambiarFormaPago() {
-  const estado = document.getElementById("ventaEstadoPago").value;
+  const elEstado = document.getElementById("ventaEstadoPago");
+  if (!elEstado) return;
+  const estado = elEstado.value;
 
-  document.getElementById("opcionesAbono").classList.toggle("hidden", estado !== "abono");
-  document.getElementById("opcionesCuotas").classList.toggle("hidden", estado !== "cuotas");
+  const abono = document.getElementById("opcionesAbono");
+  if (abono) abono.classList.toggle("hidden", estado !== "abono");
+
+  const cuotas = document.getElementById("opcionesCuotas");
+  if (cuotas) cuotas.classList.toggle("hidden", estado !== "cuotas");
 
   actualizarResumenVenta();
 }
 
 function obtenerDatosFormularioPago(total) {
-  const estado = document.getElementById("ventaEstadoPago").value;
+  const elEstado = document.getElementById("ventaEstadoPago");
+  const estado = elEstado ? elEstado.value : "pagado";
 
   let totalPagado = 0;
   let numeroCuotas = 0;
 
-  if (estado === "pagado") {
-    totalPagado = total;
-  }
-
-  if (estado === "abono") {
-    totalPagado = Number(document.getElementById("ventaAbonoInicial").value) || 0;
-  }
-
+  if (estado === "pagado") totalPagado = total;
+  if (estado === "abono") totalPagado = Number(document.getElementById("ventaAbonoInicial") ? document.getElementById("ventaAbonoInicial").value : 0) || 0;
   if (estado === "cuotas") {
-    totalPagado = Number(document.getElementById("ventaCuotaInicial").value) || 0;
-    numeroCuotas = Number(document.getElementById("ventaNumeroCuotas").value) || 0;
+    totalPagado = Number(document.getElementById("ventaCuotaInicial") ? document.getElementById("ventaCuotaInicial").value : 0) || 0;
+    numeroCuotas = Number(document.getElementById("ventaNumeroCuotas") ? document.getElementById("ventaNumeroCuotas").value : 0) || 0;
   }
 
   totalPagado = Math.max(0, Math.min(totalPagado, total));
-
-  if (estado === "pendiente") {
-    totalPagado = 0;
-  }
-
+  if (estado === "pendiente") totalPagado = 0;
   const saldo = Math.max(0, total - totalPagado);
 
   return { estado, totalPagado, saldo, numeroCuotas };
 }
 
 function obtenerTotalVenta() {
-  const productoId = document.getElementById("ventaProducto").value;
-  const cantidad = Number(document.getElementById("ventaCantidad").value) || 0;
+  const elVentaProd = document.getElementById("ventaProducto");
+  if (!elVentaProd) return 0;
+  const productoId = elVentaProd.value;
+  const cantidad = Number(document.getElementById("ventaCantidad") ? document.getElementById("ventaCantidad").value : 0) || 0;
   const producto = productos.find(p => String(p.id) === String(productoId));
 
   if (!producto) return 0;
-
   const totalNormal = (Number(producto.precio) || 0) * cantidad;
-  const precioFinal = Number(document.getElementById("ventaPrecioFinal").value) || 0;
+  const precioFinal = Number(document.getElementById("ventaPrecioFinal") ? document.getElementById("ventaPrecioFinal").value : 0) || 0;
 
-  if (precioFinal > 0) return precioFinal;
-  return totalNormal;
+  return precioFinal > 0 ? precioFinal : totalNormal;
 }
 
 function actualizarResumenVenta() {
   const total = obtenerTotalVenta();
   const datos = obtenerDatosFormularioPago(total);
 
-  document.getElementById("ventaTotal").textContent = dinero(total);
-  document.getElementById("ventaPagado").textContent = dinero(datos.totalPagado);
-  document.getElementById("ventaSaldo").textContent = dinero(datos.saldo);
+  const elTot = document.getElementById("ventaTotal"); if (elTot) elTot.textContent = dinero(total);
+  const elPag = document.getElementById("ventaPagado"); if (elPag) elPag.textContent = dinero(datos.totalPagado);
+  const elSal = document.getElementById("ventaSaldo"); if (elSal) elSal.textContent = dinero(datos.saldo);
 }
 
 async function registrarVenta() {
-  const productoId = document.getElementById("ventaProducto").value;
-  const cantidad = Number(document.getElementById("ventaCantidad").value);
-  const clienteIdValor = document.getElementById("ventaCliente").value;
+  const elVentaProd = document.getElementById("ventaProducto");
+  if (!elVentaProd) return;
+  const productoId = elVentaProd.value;
+  const cantidad = Number(document.getElementById("ventaCantidad") ? document.getElementById("ventaCantidad").value : 0);
+  const clienteIdValor = document.getElementById("ventaCliente") ? document.getElementById("ventaCliente").value : "";
   const producto = productos.find(p => String(p.id) === String(productoId));
   const cliente = clienteIdValor ? clientes.find(c => String(c.id) === String(clienteIdValor)) : null;
 
@@ -847,17 +893,9 @@ async function registrarVenta() {
   const total = obtenerTotalVenta();
   const pago = obtenerDatosFormularioPago(total);
 
-  if (!total || total <= 0) {
-    return alert("Indica en cuánto dinero se lo deja (o el precio del producto).");
-  }
-
-  if (pago.totalPagado > total) {
-    return alert("El valor pagado no puede superar el total.");
-  }
-
-  if (pago.estado === "cuotas" && pago.saldo > 0 && pago.numeroCuotas < 1) {
-    return alert("Indica cuántas cuotas tendrá el saldo.");
-  }
+  if (!total || total <= 0) return alert("Indica el precio del producto.");
+  if (pago.totalPagado > total) return alert("El valor pagado no puede superar el total.");
+  if (pago.estado === "cuotas" && pago.saldo > 0 && pago.numeroCuotas < 1) return alert("Indica cuántas cuotas tendrá el saldo.");
 
   const nuevoStock = producto.stock - cantidad;
   let estadoPagoFinal = pago.saldo === 0 ? "pagado" : pago.estado;
@@ -883,12 +921,7 @@ async function registrarVenta() {
   };
 
   if (pago.totalPagado > 0) {
-    venta.abonos.push({
-      id: Date.now() + 1,
-      monto: pago.totalPagado,
-      fecha: new Date().toISOString(),
-      cuota: null
-    });
+    venta.abonos.push({ id: Date.now() + 1, monto: pago.totalPagado, fecha: new Date().toISOString(), cuota: null });
   }
 
   if (pago.estado === "cuotas" && pago.saldo > 0) {
@@ -896,15 +929,10 @@ async function registrarVenta() {
   }
 
   try {
-    const batch = db.batch();
-
-    // 1. Guardar la venta
+    const batch = firestoreDb.batch();
     batch.set(colVentas.doc(ventaId), venta);
-
-    // 2. Descontar stock
     batch.update(colProductos.doc(String(producto.id)), { stock: nuevoStock });
 
-    // 3. Crear movimiento de inventario
     const movId = String(Date.now() + 2);
     batch.set(colMovimientos.doc(movId), {
       id: movId,
@@ -916,7 +944,6 @@ async function registrarVenta() {
       fecha: new Date().toISOString()
     });
 
-    // 4. Actualizar recordatorio de cliente
     if (cliente) {
       batch.update(colClientes.doc(String(cliente.id)), {
         ultimaCompra: venta.fecha,
@@ -927,11 +954,8 @@ async function registrarVenta() {
     }
 
     await batch.commit();
-
     limpiarFormularioVenta();
-    alert(pago.saldo > 0
-      ? `Venta registrada. Quedan ${dinero(pago.saldo)} por cobrar.`
-      : "Venta registrada y pagada completamente.");
+    alert(pago.saldo > 0 ? `Venta registrada. Quedan ${dinero(pago.saldo)} por cobrar.` : "Venta registrada y pagada.");
   } catch (err) {
     alert("Error al registrar venta en Firebase: " + err.message);
   }
@@ -951,14 +975,14 @@ function generarCuotas(saldo, cantidad) {
 }
 
 function limpiarFormularioVenta() {
-  document.getElementById("ventaProducto").value = "";
-  document.getElementById("ventaCantidad").value = 1;
-  document.getElementById("ventaCliente").value = "";
-  document.getElementById("ventaEstadoPago").value = "pagado";
-  document.getElementById("ventaPrecioFinal").value = "";
-  document.getElementById("ventaAbonoInicial").value = 0;
-  document.getElementById("ventaCuotaInicial").value = 0;
-  document.getElementById("ventaNumeroCuotas").value = 2;
+  if (document.getElementById("ventaProducto")) document.getElementById("ventaProducto").value = "";
+  if (document.getElementById("ventaCantidad")) document.getElementById("ventaCantidad").value = 1;
+  if (document.getElementById("ventaCliente")) document.getElementById("ventaCliente").value = "";
+  if (document.getElementById("ventaEstadoPago")) document.getElementById("ventaEstadoPago").value = "pagado";
+  if (document.getElementById("ventaPrecioFinal")) document.getElementById("ventaPrecioFinal").value = "";
+  if (document.getElementById("ventaAbonoInicial")) document.getElementById("ventaAbonoInicial").value = 0;
+  if (document.getElementById("ventaCuotaInicial")) document.getElementById("ventaCuotaInicial").value = 0;
+  if (document.getElementById("ventaNumeroCuotas")) document.getElementById("ventaNumeroCuotas").value = 2;
   cambiarFormaPago();
   actualizarResumenVenta();
 }
@@ -970,14 +994,13 @@ function estadoPagoHTML(v) {
     cuotas: ["A cuotas", "status-installments"],
     pendiente: ["Pendiente", "status-pending"]
   };
-
   const [texto, clase] = mapa[v.estadoPago] || ["Pendiente", "status-pending"];
   return `<span class="payment-status ${clase}">${texto}</span>`;
 }
 
 function renderVentas() {
   const contenedor = document.getElementById("ventasLista");
-
+  if (!contenedor) return;
   if (!ventas.length) {
     contenedor.innerHTML = `<div class="empty">Todavía no hay ventas.</div>`;
     return;
@@ -1005,33 +1028,6 @@ function renderVentas() {
           <button class="small-btn" onclick="registrarAbono('${v.id}')">+ Registrar abono</button>
         </div>
       ` : ""}
-
-      ${Array.isArray(v.cuotas) && v.cuotas.length ? `
-        <div class="installments">
-          ${v.cuotas.map(c => `
-            <div class="installment ${c.pagada ? "paid" : ""}">
-              <div>
-                <strong>Cuota ${c.numero}</strong><br>
-                <span class="muted">${dinero(c.monto)} · ${c.pagada ? `Pagada ${fechaTexto(c.fechaPago)}` : "Pendiente"}</span>
-              </div>
-              ${!c.pagada && v.saldo > 0
-      ? `<button class="small-btn" onclick="pagarCuota('${v.id}',${c.numero})">Pagar cuota</button>`
-      : ""}
-            </div>
-          `).join("")}
-        </div>
-      ` : ""}
-
-      ${v.abonos && v.abonos.length ? `
-        <div class="list" style="margin-top:13px">
-          ${v.abonos.slice().reverse().map(a => `
-            <div class="list-item">
-              <strong>Abono registrado: ${dinero(a.monto)}</strong>
-              <div class="muted">${fechaHoraTexto(a.fecha)}${a.cuota ? ` · Cuota ${a.cuota}` : ""}</div>
-            </div>
-          `).join("")}
-        </div>
-      ` : ""}
     </article>
   `).join("");
 }
@@ -1044,31 +1040,14 @@ async function registrarAbono(ventaId) {
   if (valorTexto === null) return;
 
   const monto = Number(valorTexto.replace(/[^\d]/g, ""));
-  if (!Number.isFinite(monto) || monto <= 0) {
-    return alert("Escribe un valor de abono válido.");
-  }
-
-  if (monto > venta.saldo) {
-    return alert("El abono no puede ser mayor que el saldo pendiente.");
-  }
+  if (!Number.isFinite(monto) || monto <= 0 || monto > venta.saldo) return alert("Valor de abono inválido.");
 
   const nuevoTotalPagado = (Number(venta.totalPagado) || 0) + monto;
   const nuevoSaldo = Math.max(0, (Number(venta.saldo) || 0) - monto);
   const nuevosAbonos = Array.isArray(venta.abonos) ? [...venta.abonos] : [];
 
-  nuevosAbonos.push({
-    id: Date.now(),
-    monto,
-    fecha: new Date().toISOString(),
-    cuota: null
-  });
-
-  let nuevoEstado = "abono";
-  if (nuevoSaldo <= 0) {
-    nuevoEstado = "pagado";
-  } else if (Array.isArray(venta.cuotas) && venta.cuotas.length) {
-    nuevoEstado = "cuotas";
-  }
+  nuevosAbonos.push({ id: Date.now(), monto, fecha: new Date().toISOString(), cuota: null });
+  let nuevoEstado = nuevoSaldo <= 0 ? "pagado" : "abono";
 
   try {
     await colVentas.doc(String(venta.id)).update({
@@ -1091,10 +1070,6 @@ async function pagarCuota(ventaId, numeroCuota) {
   const cuota = cuotas.find(c => c.numero === numeroCuota);
   if (!cuota || cuota.pagada) return;
 
-  if (cuota.monto > venta.saldo) {
-    return alert("La cuota supera el saldo pendiente. Registra primero un abono.");
-  }
-
   cuota.pagada = true;
   cuota.fechaPago = new Date().toISOString();
 
@@ -1102,31 +1077,24 @@ async function pagarCuota(ventaId, numeroCuota) {
   const nuevoSaldo = Math.max(0, (Number(venta.saldo) || 0) - cuota.monto);
   const nuevosAbonos = Array.isArray(venta.abonos) ? [...venta.abonos] : [];
 
-  nuevosAbonos.push({
-    id: Date.now(),
-    monto: cuota.monto,
-    fecha: new Date().toISOString(),
-    cuota: numeroCuota
-  });
-
-  const nuevoEstado = nuevoSaldo <= 0 ? "pagado" : "cuotas";
+  nuevosAbonos.push({ id: Date.now(), monto: cuota.monto, fecha: new Date().toISOString(), cuota: numeroCuota });
 
   try {
     await colVentas.doc(String(venta.id)).update({
       totalPagado: nuevoTotalPagado,
       saldo: nuevoSaldo,
-      estadoPago: nuevoEstado,
+      estadoPago: nuevoSaldo <= 0 ? "pagado" : "cuotas",
       cuotas,
       abonos: nuevosAbonos
     });
-    alert(`Cuota ${numeroCuota} registrada como pagada.`);
+    alert(`Cuota ${numeroCuota} pagada.`);
   } catch (err) {
     alert("Error al registrar cuota: " + err.message);
   }
 }
 
 /* =========================
-   RECORDATORIOS
+   RECORDATORIOS, DASHBOARD Y FINANZAS
 ========================= */
 
 function sumarDias(fecha, dias) {
@@ -1137,6 +1105,7 @@ function sumarDias(fecha, dias) {
 
 function renderRecordatorios() {
   const contenedor = document.getElementById("recordatoriosLista");
+  if (!contenedor) return;
 
   const pendientes = clientes
     .filter(c => c.proximoRecordatorio && !c.recordatorioAtendido)
@@ -1149,8 +1118,6 @@ function renderRecordatorios() {
 
   contenedor.innerHTML = pendientes.map(c => {
     const dias = Math.ceil((new Date(c.proximoRecordatorio) - new Date()) / 86400000);
-    const atrasado = dias < 0;
-
     return `
       <article class="reminder-card">
         <div class="card-body">
@@ -1158,9 +1125,8 @@ function renderRecordatorios() {
           <div class="customer-meta">
             Última compra: ${fechaTexto(c.ultimaCompra)}<br>
             Producto: ${escaparHTML(c.ultimaCompraProducto || "No registrado")}<br>
-            ${atrasado ? `Atrasado ${Math.abs(dias)} días` : `En ${dias} días`}
+            ${dias < 0 ? `Atrasado ${Math.abs(dias)} días` : `En ${dias} días`}
           </div>
-
           <div class="card-actions">
             ${c.whatsapp ? `<button class="small-btn" onclick="abrirWhatsApp(clientes.find(x => String(x.id) === '${c.id}'))">Contactar</button>` : ""}
             <button class="small-btn" onclick="marcarRecordatorio('${c.id}')">Marcar atendido</button>
@@ -1179,72 +1145,20 @@ async function marcarRecordatorio(clienteId) {
   }
 }
 
-async function reactivarRecordatorio(clienteId) {
-  try {
-    await colClientes.doc(String(clienteId)).update({
-      recordatorioAtendido: false,
-      proximoRecordatorio: new Date().toISOString()
-    });
-  } catch (err) {
-    alert("Error al reactivar recordatorio: " + err.message);
-  }
-}
-
-/* =========================
-   DASHBOARD
-========================= */
-
 function renderDashboard() {
   const ventasHoy = ventas.filter(v => hoyEs(v.fecha));
-
   const totalHoy = ventasHoy.reduce((s, v) => s + Number(v.total || 0), 0);
   const gananciaHoy = ventasHoy.reduce((s, v) => s + Number(v.ganancia || 0), 0);
   const porCobrar = ventas.reduce((s, v) => s + Number(v.saldo || 0), 0);
   const stockTotal = productos.reduce((s, p) => s + Number(p.stock || 0), 0);
 
-  document.getElementById("ventasHoy").textContent = dinero(totalHoy);
-  document.getElementById("gananciaHoy").textContent = dinero(gananciaHoy);
-  document.getElementById("dineroPorCobrar").textContent = dinero(porCobrar);
-  document.getElementById("cantidadProductos").textContent = productos.length;
-  document.getElementById("stockTotal").textContent = stockTotal;
-  document.getElementById("cantidadClientes").textContent = clientes.length;
-
-  const recordatorios = clientes
-    .filter(c => c.proximoRecordatorio && !c.recordatorioAtendido)
-    .sort((a, b) => new Date(a.proximoRecordatorio) - new Date(b.proximoRecordatorio))
-    .slice(0, 5);
-
-  const rec = document.getElementById("dashboardRecordatorios");
-
-  rec.innerHTML = recordatorios.length
-    ? recordatorios.map(c => `
-        <div class="list-item">
-          <strong>${escaparHTML(c.nombre)}</strong>
-          <div class="muted">
-            ${escaparHTML(c.ultimaCompraProducto || "Sin producto")} · ${fechaTexto(c.proximoRecordatorio)}
-          </div>
-        </div>
-      `).join("")
-    : `<div class="empty">No hay clientes pendientes.</div>`;
-
-  const recientes = document.getElementById("ventasRecientes");
-
-  recientes.innerHTML = ventas.length
-    ? ventas.slice(0, 5).map(v => `
-        <div class="list-item">
-          <strong>${escaparHTML(v.producto)} × ${v.cantidad}</strong>
-          <div class="muted">
-            ${escaparHTML(v.cliente || "Sin cliente")} · ${dinero(v.total)}
-            · ${v.saldo > 0 ? `Debe ${dinero(v.saldo)}` : "Pagado"}
-          </div>
-        </div>
-      `).join("")
-    : `<div class="empty">No hay ventas todavía.</div>`;
+  const elVH = document.getElementById("ventasHoy"); if (elVH) elVH.textContent = dinero(totalHoy);
+  const elGH = document.getElementById("gananciaHoy"); if (elGH) elGH.textContent = dinero(gananciaHoy);
+  const elDPC = document.getElementById("dineroPorCobrar"); if (elDPC) elDPC.textContent = dinero(porCobrar);
+  const elCP = document.getElementById("cantidadProductos"); if (elCP) elCP.textContent = productos.length;
+  const elST = document.getElementById("stockTotal"); if (elST) elST.textContent = stockTotal;
+  const elCC = document.getElementById("cantidadClientes"); if (elCC) elCC.textContent = clientes.length;
 }
-
-/* =========================
-   FINANZAS
-========================= */
 
 function renderFinanzas() {
   const totalVentas = ventas.reduce((s, v) => s + Number(v.total || 0), 0);
@@ -1252,56 +1166,11 @@ function renderFinanzas() {
   const pendiente = ventas.reduce((s, v) => s + Number(v.saldo || 0), 0);
   const ganancia = ventas.reduce((s, v) => s + Number(v.ganancia || 0), 0);
 
-  const gananciaRecibida = ventas.reduce((s, v) => {
-    const t = Number(v.total || 0);
-    if (t <= 0) return s;
-    return s + Number(v.ganancia || 0) * (Number(v.totalPagado || 0) / t);
-  }, 0);
-
-  const gananciaPendiente = ganancia - gananciaRecibida;
-  const unidades = ventas.reduce((s, v) => s + Number(v.cantidad || 0), 0);
-  const margen = totalVentas ? (ganancia / totalVentas) * 100 : 0;
-
-  document.getElementById("finTotalVentas").textContent = dinero(totalVentas);
-  document.getElementById("finRecibido").textContent = dinero(recibido);
-  document.getElementById("finPendiente").textContent = dinero(pendiente);
-  document.getElementById("finGanancia").textContent = dinero(ganancia);
-  document.getElementById("finGananciaRecibida").textContent = dinero(gananciaRecibida);
-  document.getElementById("finGananciaPendiente").textContent = dinero(gananciaPendiente);
-  document.getElementById("finUnidades").textContent = unidades;
-  document.getElementById("finMargen").textContent = `${margen.toFixed(1)}%`;
-
-  document.getElementById("finanzasDetalle").innerHTML = `
-    <div class="finance-line">
-      <span>Valor total de todas las ventas</span>
-      <strong>${dinero(totalVentas)}</strong>
-    </div>
-    <div class="finance-line">
-      <span>Dinero que ya recibiste</span>
-      <strong>${dinero(recibido)}</strong>
-    </div>
-    <div class="finance-line">
-      <span>Dinero que todavía te deben</span>
-      <strong class="${pendiente > 0 ? "stock-low" : "stock-ok"}">${dinero(pendiente)}</strong>
-    </div>
-    <div class="finance-line">
-      <span>Ganancia registrada</span>
-      <strong>${dinero(ganancia)}</strong>
-    </div>
-    <div class="finance-line">
-      <span>Ganancia de lo que ya te pagaron</span>
-      <strong class="stock-ok">${dinero(gananciaRecibida)}</strong>
-    </div>
-    <div class="finance-line">
-      <span>Ganancia de lo que todavía te deben</span>
-      <strong class="${gananciaPendiente > 0 ? "stock-low" : "stock-ok"}">${dinero(gananciaPendiente)}</strong>
-    </div>
-  `;
+  const elTot = document.getElementById("finTotalVentas"); if (elTot) elTot.textContent = dinero(totalVentas);
+  const elRec = document.getElementById("finRecibido"); if (elRec) elRec.textContent = dinero(recibido);
+  const elPen = document.getElementById("finPendiente"); if (elPen) elPen.textContent = dinero(pendiente);
+  const elGan = document.getElementById("finGanancia"); if (elGan) elGan.textContent = dinero(ganancia);
 }
-
-/* =========================
-   ACTUALIZACIÓN GENERAL
-========================= */
 
 function actualizarTodo() {
   cargarSelects();
@@ -1313,10 +1182,7 @@ function actualizarTodo() {
   renderFinanzas();
   renderDashboard();
 
-  if (clienteCuentaAbierta) {
-    verCuentaCliente(clienteCuentaAbierta);
-  }
-
+  if (clienteCuentaAbierta) verCuentaCliente(clienteCuentaAbierta);
   actualizarResumenVenta();
 }
 
